@@ -570,7 +570,7 @@ export default function GameDetailPage({ params }) {
 
     return (
         <div className="space-y-8">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <h1 className="text-3xl font-bold">Spieldetails</h1>
                 <Link href="/games">
                     <Button variant="secondary">Zurück zur Spieleübersicht</Button>
