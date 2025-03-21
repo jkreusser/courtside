@@ -34,6 +34,25 @@ CREATE TABLE public.matches (
     created_by UUID REFERENCES auth.users(id)
 );
 
+-- Spielplan-Tabellen
+CREATE TABLE public.schedules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    court_count INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE public.schedule_matches (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    schedule_id UUID REFERENCES public.schedules(id) ON DELETE CASCADE,
+    player1_id UUID REFERENCES public.players(id) ON DELETE CASCADE,
+    player2_id UUID REFERENCES public.players(id) ON DELETE CASCADE,
+    court INTEGER NOT NULL,
+    round INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
 -- Rankings-Funktionen
 CREATE OR REPLACE FUNCTION get_all_time_rankings()
 RETURNS TABLE (
@@ -151,6 +170,8 @@ Führe folgende SQL-Befehle aus, um RLS für die Tabellen zu aktivieren und die 
 ALTER TABLE public.players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.matches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.schedules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.schedule_matches ENABLE ROW LEVEL SECURITY;
 
 -- Policy für Spieler: Jeder kann alle Spieler sehen (auch ohne Anmeldung)
 CREATE POLICY "Jeder kann alle Spieler sehen"
@@ -254,6 +275,95 @@ USING (
         WHERE id = auth.uid() AND role = 'admin'
     )
 );
+
+-- Policies für Spielpläne
+-- Policy für Spielpläne: Jeder kann Spielpläne sehen
+CREATE POLICY "Jeder kann Spielpläne sehen" 
+ON public.schedules FOR SELECT 
+TO anon, authenticated
+USING (true);
+
+-- Policy für Spielpläne: Authentifizierte Benutzer können Spielpläne erstellen
+CREATE POLICY "Authentifizierte Benutzer können Spielpläne erstellen" 
+ON public.schedules FOR INSERT 
+TO authenticated
+WITH CHECK (auth.uid() = created_by);
+
+-- Policy für Spielpläne: Ersteller und Admins können Spielpläne aktualisieren
+CREATE POLICY "Ersteller und Admins können Spielpläne aktualisieren" 
+ON public.schedules FOR UPDATE 
+TO authenticated
+USING (
+    auth.uid() = created_by OR
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE id = auth.uid() AND role = 'admin'
+    )
+);
+
+-- Policy für Spielpläne: Ersteller und Admins können Spielpläne löschen
+CREATE POLICY "Ersteller und Admins können Spielpläne löschen" 
+ON public.schedules FOR DELETE 
+TO authenticated
+USING (
+    auth.uid() = created_by OR
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE id = auth.uid() AND role = 'admin'
+    )
+);
+
+-- Policies für Spielplan-Matches
+-- Policy für Spielplan-Matches: Jeder kann Spielplan-Matches sehen
+CREATE POLICY "Jeder kann Spielplan-Matches sehen" 
+ON public.schedule_matches FOR SELECT 
+TO anon, authenticated
+USING (true);
+
+-- Policy für Spielplan-Matches: Authentifizierte Benutzer können Spielplan-Matches erstellen
+CREATE POLICY "Authentifizierte Benutzer können Spielplan-Matches erstellen" 
+ON public.schedule_matches FOR INSERT 
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.schedules
+        WHERE id = schedule_id AND created_by = auth.uid()
+    ) OR
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE id = auth.uid() AND role = 'admin'
+    )
+);
+
+-- Policy für Spielplan-Matches: Ersteller und Admins können Spielplan-Matches aktualisieren
+CREATE POLICY "Ersteller und Admins können Spielplan-Matches aktualisieren" 
+ON public.schedule_matches FOR UPDATE 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.schedules
+        WHERE id = schedule_id AND created_by = auth.uid()
+    ) OR
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE id = auth.uid() AND role = 'admin'
+    )
+);
+
+-- Policy für Spielplan-Matches: Ersteller und Admins können Spielplan-Matches löschen
+CREATE POLICY "Ersteller und Admins können Spielplan-Matches löschen" 
+ON public.schedule_matches FOR DELETE 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.schedules
+        WHERE id = schedule_id AND created_by = auth.uid()
+    ) OR
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE id = auth.uid() AND role = 'admin'
+    )
+);
 ```
 
 ## 3. Umgebungsvariablen einrichten
@@ -283,4 +393,4 @@ SET role = 'admin'
 WHERE id = 'deine-benutzer-id';
 ```
 
-Ersetze `deine-benutzer-id` durch die ID des Benutzers, den du zum Admin machen möchtest. 
+Ersetze `deine-benutzer-id` durch die ID des Benutzers, den du zum Admin machen möchtest.

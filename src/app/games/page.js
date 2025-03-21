@@ -15,6 +15,13 @@ export default function GamesPage() {
     const [games, setGames] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all'); // 'all', 'active', 'completed'
+    const [displayCount, setDisplayCount] = useState(5); // Anzahl der anzuzeigenden Spiele
+    const [scheduleDisplayCount, setScheduleDisplayCount] = useState(5); // Anzahl der anzuzeigenden Spielpläne
+
+    // Spielplan-States
+    const [schedules, setSchedules] = useState([]);
+    const [loadingSchedules, setLoadingSchedules] = useState(true);
+    const [playerCounts, setPlayerCounts] = useState({});
 
     // Router-Schutz: Leite zur Login-Seite weiter, wenn der Benutzer nicht angemeldet ist
     useEffect(() => {
@@ -31,7 +38,7 @@ export default function GamesPage() {
             try {
                 setLoading(true);
 
-                // Lade alle Spiele mit Spielerinformationen
+                // Lade Spiele mit Informationen über die Spieler und Ergebnisse
                 const { data, error } = await supabase
                     .from('games')
                     .select(`
@@ -43,22 +50,87 @@ export default function GamesPage() {
                     .order('created_at', { ascending: false });
 
                 if (error) {
-                    throw error;
+                    console.error('Fehler beim Laden der Spiele:', error);
+                    toast.error('Fehler beim Laden der Spiele');
+
+                    // Warte kurz und versuche es nochmal
+                    setTimeout(() => {
+                        router.refresh();
+                    }, 1500);
+                    return;
                 }
 
                 setGames(data || []);
             } catch (error) {
+                console.error('Unerwarteter Fehler beim Laden der Spiele:', error);
                 toast.error('Fehler beim Laden der Spiele');
-                console.error(error);
+
+                // Warte kurz und versuche es nochmal
+                setTimeout(() => {
+                    router.refresh();
+                }, 1500);
             } finally {
                 setLoading(false);
             }
         };
 
+        const fetchSchedules = async () => {
+            if (!user) return;
+
+            try {
+                setLoadingSchedules(true);
+
+                // Lade Spielpläne
+                const { data: schedulesData, error: schedulesError } = await supabase
+                    .from('schedules')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (schedulesError) {
+                    console.error('Fehler beim Laden der Spielpläne:', schedulesError);
+                    toast.error('Fehler beim Laden der Spielpläne');
+                    return;
+                }
+
+                setSchedules(schedulesData || []);
+
+                // Lade die Anzahl der Spieler pro Spielplan
+                const counts = {};
+
+                if (schedulesData && schedulesData.length > 0) {
+                    for (const schedule of schedulesData) {
+                        const { data: matchesData, error: matchesError } = await supabase
+                            .from('schedule_matches')
+                            .select('player1_id, player2_id')
+                            .eq('schedule_id', schedule.id);
+
+                        if (!matchesError && matchesData) {
+                            // Sammle einzigartige Spieler-IDs
+                            const playerIds = new Set();
+                            matchesData.forEach(match => {
+                                if (match.player1_id) playerIds.add(match.player1_id);
+                                if (match.player2_id) playerIds.add(match.player2_id);
+                            });
+
+                            counts[schedule.id] = playerIds.size;
+                        }
+                    }
+                }
+
+                setPlayerCounts(counts);
+            } catch (error) {
+                console.error('Unerwarteter Fehler beim Laden der Spielpläne:', error);
+                toast.error('Fehler beim Laden der Spielpläne');
+            } finally {
+                setLoadingSchedules(false);
+            }
+        };
+
         if (user && !authLoading) {
             fetchGames();
+            fetchSchedules();
         }
-    }, [user, authLoading]);
+    }, [user, authLoading, router]);
 
     // Gefilterte Spiele basierend auf dem ausgewählten Filter
     const filteredGames = games.filter(game => {
@@ -67,13 +139,21 @@ export default function GamesPage() {
         return true; // 'all'
     });
 
-    if (authLoading) {
-        return <div className="text-center py-8">Authentifizierung lädt...</div>;
-    }
+    // Begrenzte Anzahl von Spielen für die Anzeige
+    const displayedGames = filteredGames.slice(0, displayCount);
 
-    if (!user) {
-        return null;
-    }
+    // Begrenzte Anzahl von Spielplänen für die Anzeige
+    const displayedSchedules = schedules.slice(0, scheduleDisplayCount);
+
+    // Funktion zum Laden weiterer Spiele
+    const loadMoreGames = () => {
+        setDisplayCount(prevCount => prevCount + 5);
+    };
+
+    // Funktion zum Laden weiterer Spielpläne
+    const loadMoreSchedules = () => {
+        setScheduleDisplayCount(prevCount => prevCount + 5);
+    };
 
     // Hilfsfunktion zum Anzeigen des Spielstatus
     const renderStatus = (status) => {
@@ -86,13 +166,21 @@ export default function GamesPage() {
         }
     };
 
+    if (authLoading) {
+        return <div className="text-center py-8">Authentifizierung lädt...</div>;
+    }
+
+    if (!user) {
+        return null;
+    }
+
     return (
         <div className="space-y-6 sm:space-y-8">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <h1 className="text-2xl sm:text-3xl font-bold">Alle Spiele</h1>
-                <div className="flex items-center">
-                    <Link href="/games/new">
-                        <Button className="w-full sm:w-auto">Neues Spiel starten</Button>
+                <div className="flex flex-col sm:flex-row gap-2">
+                    <Link href="/games/new" className="w-full sm:w-auto">
+                        <Button className="w-full">Neues Spiel starten</Button>
                     </Link>
                 </div>
             </div>
@@ -142,7 +230,7 @@ export default function GamesPage() {
                         <>
                             {/* Mobile Ansicht (Karten) */}
                             <div className="md:hidden space-y-4">
-                                {filteredGames.map((game) => {
+                                {displayedGames.map((game) => {
                                     // Berechne den aktuellen Spielstand
                                     const player1Sets = game.scores?.filter(score =>
                                         score.player1_score > score.player2_score
@@ -202,7 +290,7 @@ export default function GamesPage() {
                             <div className="hidden md:block overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
-                                        <tr className="border-b">
+                                        <tr className="border-b border-zinc-800">
                                             <th className="text-left py-3 px-4">Spieler</th>
                                             <th className="text-left py-3 px-4">Ergebnis</th>
                                             <th className="text-left py-3 px-4">Format</th>
@@ -211,7 +299,7 @@ export default function GamesPage() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {filteredGames.map((game) => {
+                                        {displayedGames.map((game) => {
                                             // Berechne den aktuellen Spielstand
                                             const player1Sets = game.scores?.filter(score =>
                                                 score.player1_score > score.player2_score
@@ -224,7 +312,7 @@ export default function GamesPage() {
                                             return (
                                                 <tr
                                                     key={game.id}
-                                                    className="border-b hover:bg-zinc-800/50 cursor-pointer transition-colors"
+                                                    className="border-b border-zinc-800 hover:bg-zinc-800/50 cursor-pointer transition-colors"
                                                     onClick={() => router.push(`/games/${game.id}`)}
                                                 >
                                                     <td className="py-3 px-4">
@@ -264,10 +352,130 @@ export default function GamesPage() {
                                     </tbody>
                                 </table>
                             </div>
+
+                            {/* "Mehr laden" Button */}
+                            {filteredGames.length > displayCount && (
+                                <div className="text-center mt-6">
+                                    <Button
+                                        variant="outline"
+                                        onClick={loadMoreGames}
+                                        className="w-full md:w-auto"
+                                    >
+                                        Mehr Spiele laden
+                                    </Button>
+                                </div>
+                            )}
                         </>
                     )}
                 </CardContent>
             </Card>
+
+            {/* Spielpläne */}
+            <div className="mt-10">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                    <h2 className="text-xl sm:text-2xl font-bold">Spielpläne</h2>
+                    <Link href="/games/schedules/new" className="w-full md:w-auto">
+                        <Button className="w-full">Neuen Spielplan erstellen</Button>
+                    </Link>
+                </div>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Alle Spielpläne</CardTitle>
+                        <CardDescription>
+                            Hier siehst du alle erstellten Spielpläne.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {loadingSchedules ? (
+                            <div className="text-center py-8">Lade Spielpläne...</div>
+                        ) : schedules.length === 0 ? (
+                            <div className="text-center py-8 text-zinc-500">
+                                Keine Spielpläne gefunden. Erstelle einen neuen Spielplan!
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {/* Mobile Ansicht (Karten) */}
+                                <div className="md:hidden space-y-4">
+                                    {displayedSchedules.map((schedule) => (
+                                        <div
+                                            key={schedule.id}
+                                            className="border border-zinc-800 rounded-lg p-4 hover:bg-zinc-800/50 transition-colors cursor-pointer"
+                                            onClick={() => router.push(`/games/schedules/${schedule.id}`)}
+                                        >
+                                            <div className="flex justify-between items-start mb-3">
+                                                <div>
+                                                    <h3 className="font-semibold">{schedule.name}</h3>
+                                                    <div className="text-sm text-zinc-400 mt-1">
+                                                        Erstellt am {new Date(schedule.created_at).toLocaleDateString()}
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col items-end gap-2">
+                                                    <div className="bg-zinc-800 px-2 py-1 rounded text-xs font-medium">
+                                                        {schedule.court_count} {schedule.court_count === 1 ? 'Court' : 'Courts'}
+                                                    </div>
+                                                    <div className="bg-zinc-800 px-2 py-1 rounded text-xs font-medium">
+                                                        {playerCounts[schedule.id] || 0} Spieler
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Desktop Ansicht (Tabelle) */}
+                                <div className="hidden md:block overflow-x-auto">
+                                    <table className="w-full">
+                                        <thead>
+                                            <tr className="border-b border-zinc-800">
+                                                <th className="text-left py-3 px-4">Name</th>
+                                                <th className="text-left py-3 px-4">Anzahl Courts</th>
+                                                <th className="text-left py-3 px-4">Anzahl Spieler</th>
+                                                <th className="text-left py-3 px-4">Datum</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {displayedSchedules.map((schedule) => (
+                                                <tr
+                                                    key={schedule.id}
+                                                    className="border-b border-zinc-800 hover:bg-zinc-800/50 transition-colors cursor-pointer"
+                                                    onClick={() => router.push(`/games/schedules/${schedule.id}`)}
+                                                >
+                                                    <td className="py-3 px-4">{schedule.name}</td>
+                                                    <td className="py-3 px-4">
+                                                        <span className="bg-zinc-800 px-2 py-1 rounded text-xs font-medium">
+                                                            {schedule.court_count} {schedule.court_count === 1 ? 'Court' : 'Courts'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-4">
+                                                        <span className="bg-zinc-800 px-2 py-1 rounded text-xs font-medium">
+                                                            {playerCounts[schedule.id] || 0} Spieler
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-4">{new Date(schedule.created_at).toLocaleDateString()}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* "Mehr laden" Button für Spielpläne */}
+                                {schedules.length > scheduleDisplayCount && (
+                                    <div className="text-center mt-6">
+                                        <Button
+                                            variant="outline"
+                                            onClick={loadMoreSchedules}
+                                            className="w-full md:w-auto"
+                                        >
+                                            Mehr Spielpläne laden
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
         </div>
     );
 }

@@ -439,15 +439,31 @@ export const getCurrentUser = async () => {
 // Funktion zum Aktualisieren des eigenen Profils
 export async function getProfile(userId) {
     try {
+        // Erst nur das Profil abrufen, ohne JOIN auf players
         const { data, error } = await supabase
             .from('profiles')
-            .select('*, players!inner(*)')
+            .select('*')
             .eq('id', userId)
             .single();
 
         if (error) throw error;
-        return { data, error: null };
+
+        // Versuche zusätzlich den players-Eintrag zu holen, falls vorhanden
+        const { data: playerData, error: playerError } = await supabase
+            .from('players')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+
+        // Kombiniere die Daten, wenn playerData existiert
+        const combinedData = {
+            ...data,
+            players: playerError ? null : playerData
+        };
+
+        return { data: combinedData, error: null };
     } catch (error) {
+        console.error("Fehler beim Abrufen des Profils:", error);
         return { data: null, error };
     }
 }

@@ -10,7 +10,7 @@ import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 
 export default function ProfilePage() {
-    const { user, loading } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const router = useRouter();
     const [profile, setProfile] = useState(null);
     const [formData, setFormData] = useState({
@@ -22,6 +22,7 @@ export default function ProfilePage() {
         newAccessCode: '',
         confirmAccessCode: '',
     });
+    const [profileLoading, setProfileLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isChangingAccessCode, setIsChangingAccessCode] = useState(false);
 
@@ -31,6 +32,7 @@ export default function ProfilePage() {
             if (!user) return;
 
             try {
+                setProfileLoading(true);
                 const { data, error } = await getProfile(user.id);
                 if (error) {
                     throw error;
@@ -38,12 +40,14 @@ export default function ProfilePage() {
 
                 setProfile(data);
                 setFormData({
-                    name: data.name || '',
-                    email: data.email || '',
+                    name: data.name || user.user_metadata?.name || '',
+                    email: data.email || user.email || '',
                 });
             } catch (error) {
                 toast.error('Fehler beim Laden des Profils');
-                console.error(error);
+                console.error("Profilfehler:", error);
+            } finally {
+                setProfileLoading(false);
             }
         };
 
@@ -52,11 +56,11 @@ export default function ProfilePage() {
 
     // Leite nicht angemeldete Benutzer zur Login-Seite weiter
     useEffect(() => {
-        if (!loading && !user) {
+        if (!authLoading && !user) {
             router.push('/login');
             toast.error('Bitte melde dich an, um dein Profil zu bearbeiten');
         }
-    }, [user, loading, router]);
+    }, [user, authLoading, router]);
 
     // Aktualisiere Profilformular
     const handleInputChange = (e) => {
@@ -162,7 +166,7 @@ export default function ProfilePage() {
     };
 
     // Wenn Benutzer nicht angemeldet ist oder Profil geladen wird
-    if (loading || !user || !profile) {
+    if (profileLoading || !user || !profile) {
         return (
             <div className="flex justify-center items-center py-12">
                 <div className="text-center">
