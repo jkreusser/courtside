@@ -1,0 +1,41 @@
+{
+  "name": "squash-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Eine Anwendung zur Organisation von Squash-Spielen, Verwaltung von Spielpaarungen und Rankings",
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@heroicons/react": "^2.2.0",
+    "@supabase/auth-ui-react": "latest",
+    "@supabase/auth-ui-shared": "latest",
+    "@supabase/ssr": "latest",
+    "@supabase/supabase-js": "latest",
+    "clsx": "latest",
+    "date-fns": "latest",
+    "next": "15.2.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hot-toast": "latest",
+    "recharts": "^2.15.1",
+    "tailwindcss-animate": "latest",
+    "zustand": "latest"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "eslint": "^9",
+    "eslint-config-next": "15.2.3",
+    "tailwindcss": "^4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/squash-app"
+  },
+  "author": "Your Name",
+  "license": "MIT"
+}
