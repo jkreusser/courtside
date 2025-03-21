@@ -7,7 +7,7 @@ const Card = forwardRef(({ className, ...props }, ref) => (
     <div
         ref={ref}
         className={clsx(
-            'rounded-lg border border-zinc-200 bg-white text-zinc-950 shadow-sm hover:shadow-md transition-all duration-200 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50 hover:border-zinc-300 dark:hover:border-zinc-700',
+            'rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-50 shadow-sm hover:shadow-md transition-all duration-200 hover:border-zinc-700',
             className
         )}
         {...props}
@@ -39,7 +39,7 @@ CardTitle.displayName = 'CardTitle';
 const CardDescription = forwardRef(({ className, ...props }, ref) => (
     <p
         ref={ref}
-        className={clsx('text-sm text-zinc-500 dark:text-zinc-400', className)}
+        className={clsx('text-sm text-zinc-400', className)}
         {...props}
     />
 ));

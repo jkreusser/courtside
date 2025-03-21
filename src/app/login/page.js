@@ -143,7 +143,7 @@ export default function LoginPage() {
     return (
         <div className="max-w-md mx-auto">
             <Card>
-                <CardHeader className="border-b border-zinc-200 dark:border-zinc-800">
+                <CardHeader className="border-b border-zinc-800">
                     <CardTitle className="text-white">Anmelden</CardTitle>
                     <CardDescription>
                         Melde dich mit deiner E-Mail und dem Zugangscode an.
@@ -198,7 +198,7 @@ export default function LoginPage() {
                                     required
                                     className="focus:border-primary focus:ring-primary"
                                 />
-                                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                                <p className="text-sm text-zinc-400 mt-1">
                                     Da wir dich nicht kennen, erstellen wir einen neuen Account für dich.
                                 </p>
                             </div>
@@ -219,7 +219,7 @@ export default function LoginPage() {
                         )}
                     </form>
                 </CardContent>
-                <CardFooter className="text-center text-sm text-zinc-500 border-t border-zinc-200 dark:border-zinc-800 py-4">
+                <CardFooter className="text-center text-sm text-zinc-400 border-t border-zinc-800 py-4">
                     <p className="mx-auto">
                         Gib den Zugangscode ein, den du von deinem Teamleiter erhalten hast.
                     </p>

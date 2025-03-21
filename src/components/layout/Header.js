@@ -55,7 +55,7 @@ export default function Header() {
     }
 
     return (
-        <header className="bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800">
+        <header className="bg-zinc-950 border-b border-zinc-800">
             <div className="container mx-auto px-4 py-4">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center">
@@ -66,7 +66,7 @@ export default function Header() {
 
                     {/* Mobile menu button mit Animation */}
                     <button
-                        className="md:hidden p-2 rounded-md text-zinc-400 hover:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all duration-200"
+                        className="md:hidden p-2 rounded-md text-zinc-400 hover:text-zinc-500 hover:bg-zinc-800 transition-all duration-200"
                         onClick={handleMenuToggle}
                         aria-label={mobileMenuOpen ? "Menü schließen" : "Menü öffnen"}
                         aria-expanded={mobileMenuOpen}
@@ -113,7 +113,7 @@ export default function Header() {
                                     'px-3 py-2 rounded-md text-sm font-medium',
                                     pathname === item.href
                                         ? 'bg-secondary text-primary'
-                                        : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'
+                                        : 'text-zinc-300 hover:bg-zinc-800'
                                 )}
                             >
                                 {item.name}
@@ -123,14 +123,14 @@ export default function Header() {
                         {user ? (
                             <a
                                 onClick={handleSignOut}
-                                className="ml-2 px-0 py-2 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 cursor-pointer"
+                                className="ml-2 px-0 py-2 rounded-md text-sm font-medium text-zinc-300 hover:bg-zinc-800 cursor-pointer"
                             >
                                 Abmelden
                             </a>
                         ) : (
                             <Link
                                 href="/login"
-                                className="ml-2 px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-zinc-900 dark:hover:bg-zinc-800"
+                                className="ml-2 px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-zinc-800"
                             >
                                 Anmelden
                             </Link>
@@ -152,7 +152,7 @@ export default function Header() {
                                         'px-3 py-2 rounded-md text-sm font-medium block mobile-menu-item',
                                         pathname === item.href
                                             ? 'bg-secondary text-primary'
-                                            : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'
+                                            : 'text-zinc-300 hover:bg-zinc-800'
                                     )}
                                     onClick={handleMenuToggle}
                                     style={{ animationDelay: `${0.05 * (index + 1)}s` }}
@@ -167,7 +167,7 @@ export default function Header() {
                                         handleSignOut();
                                         handleMenuToggle();
                                     }}
-                                    className="px-3 py-2 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 text-left mobile-menu-item cursor-pointer block"
+                                    className="px-3 py-2 rounded-md text-sm font-medium text-zinc-300 hover:bg-zinc-800 text-left mobile-menu-item cursor-pointer block"
                                     style={{ animationDelay: `${0.05 * (navItems.length + 1)}s` }}
                                 >
                                     Abmelden
@@ -175,7 +175,7 @@ export default function Header() {
                             ) : (
                                 <Link
                                     href="/login"
-                                    className="px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-zinc-900 dark:hover:bg-zinc-800 block mobile-menu-item"
+                                    className="px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-zinc-800 block mobile-menu-item"
                                     onClick={handleMenuToggle}
                                     style={{ animationDelay: `${0.05 * (navItems.length + 1)}s` }}
                                 >

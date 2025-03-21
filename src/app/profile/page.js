@@ -210,7 +210,7 @@ export default function ProfilePage() {
                                     type="email"
                                     value={formData.email}
                                     disabled
-                                    className="bg-zinc-100 dark:bg-zinc-800"
+                                    className="bg-zinc-800"
                                 />
                                 <p className="text-xs text-zinc-500">
                                     Die E-Mail-Adresse kann nicht geändert werden.

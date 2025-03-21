@@ -9,9 +9,9 @@ const Button = forwardRef(
 
         const variantStyles = {
             primary: 'bg-primary hover:bg-white text-secondary',
-            secondary: 'border border-white bg-transparent hover:bg-white/10 dark:border-white text-white',
-            outline: 'border border-white bg-transparent hover:bg-white/10 dark:border-white text-white',
-            ghost: 'bg-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-50',
+            secondary: 'border border-white bg-transparent hover:bg-white/10 text-white',
+            outline: 'border border-white bg-transparent hover:bg-white/10 text-white',
+            ghost: 'bg-transparent hover:bg-zinc-800 text-zinc-50',
             danger: 'bg-red-500 hover:bg-red-600 text-white',
         };
 

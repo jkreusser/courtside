@@ -189,7 +189,7 @@ export default function AdminPage() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="p-4 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+                    <div className="p-4 bg-zinc-800 rounded-lg">
                         <span className="font-mono font-bold">{globalAccessCode}</span>
                     </div>
                     <p className="mt-4 text-sm text-zinc-500">
@@ -275,7 +275,7 @@ export default function AdminPage() {
                                     {players.map((player) => (
                                         <tr
                                             key={player.id}
-                                            className="border-b hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                                            className="border-b hover:bg-zinc-900"
                                         >
                                             <td className="py-3 px-4">{player.name}</td>
                                             <td className="py-3 px-4">{player.email}</td>

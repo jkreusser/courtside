@@ -35,8 +35,8 @@ export default function RootLayout({ children }) {
           <div className="flex flex-col min-h-screen">
             <Header />
             <main className="flex-1 container mx-auto px-4 py-4 sm:py-8">{children}</main>
-            <footer className="bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-800 py-4 sm:py-6">
-              <div className="container mx-auto px-4 text-sm text-zinc-500 dark:text-zinc-400">
+            <footer className="bg-zinc-950 border-t border-zinc-800 py-4 sm:py-6">
+              <div className="container mx-auto px-4 text-sm text-zinc-400">
                 <div className="flex justify-between items-center">
                   <div>&copy; 2025 CourtSide</div>
                   <div>
