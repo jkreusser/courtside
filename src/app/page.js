@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { supabase, getPlayers } from '@/lib/supabase';
+import { supabase, getPlayers, getRankings } from '@/lib/supabase';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Link from 'next/link';
@@ -17,6 +17,7 @@ export default function DashboardPage() {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [rankings, setRankings] = useState([]);
 
   // Wenn angemeldet, lade Spiele des Benutzers
   useEffect(() => {
@@ -62,6 +63,23 @@ export default function DashboardPage() {
       try {
         setLoading(true);
         setError(null);
+
+        // Wenn der Benutzer nicht angemeldet ist, verwende die getRankings-Funktion,
+        // ansonsten die vorhandene Implementierung
+        if (!user) {
+          const { data: rankingsData, error: rankingsError } = await getRankings(true, 5);
+
+          if (rankingsError) {
+            console.error('Fehler beim Laden der Rangliste:', JSON.stringify(rankingsError));
+            setError(`Rangliste konnte nicht geladen werden: ${rankingsError.message || 'Unbekannter Fehler'}`);
+            setRankings([]);
+            return;
+          }
+
+          setRankings(rankingsData || []);
+          setLoading(false);
+          return;
+        }
 
         // Verwende die optimierte getPlayers-Funktion mit Caching
         const { data: playersData, error: playersError } = await getPlayers();
@@ -209,7 +227,7 @@ export default function DashboardPage() {
     };
 
     fetchPlayers();
-  }, []);  // Keine Abhängigkeiten, lädt nur einmal beim Mounten
+  }, [user]);  // Abhängigkeit auf den Benutzer hinzugefügt
 
   if (authLoading) {
     return <div className="text-center py-8">Lade...</div>;
@@ -301,7 +319,7 @@ export default function DashboardPage() {
               <div className="text-center py-8">Lade Rangliste...</div>
             ) : error ? (
               <div className="text-center py-8 text-red-600">{error}</div>
-            ) : players.length === 0 ? (
+            ) : rankings.length === 0 ? (
               <div className="text-center py-8 text-zinc-500">
                 Noch keine Spieler verfügbar.
               </div>
@@ -313,28 +331,28 @@ export default function DashboardPage() {
                       <tr className="border-b border-zinc-800">
                         <th className="text-left py-3 px-2 sm:px-4">Rang</th>
                         <th className="text-left py-3 px-2 sm:px-4">Spieler</th>
-                        <th className="text-left py-3 px-2 sm:px-4">Spiele</th>
-                        <th className="text-left py-3 px-2 sm:px-4">Siege</th>
                         <th className="text-left py-3 px-2 sm:px-4">Winrate</th>
+                        <th className="text-left py-3 px-2 sm:px-4">Siege</th>
+                        <th className="text-left py-3 px-2 sm:px-4">Spiele</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {players.slice(0, 5).map((player, index) => (
+                      {rankings.slice(0, 5).map((player, index) => (
                         <tr
-                          key={player.id}
+                          key={player.player_id}
                           className={`${index === 0 ? 'bg-secondary text-white' : 'border-b border-zinc-800'}`}
                         >
                           <td className="py-3 px-2 sm:px-4 font-semibold">
                             {index + 1}
                           </td>
-                          <td className="py-3 px-2 sm:px-4">{player.name || 'Unbekannt'}</td>
-                          <td className="py-3 px-2 sm:px-4 font-mono">{player.games}</td>
-                          <td className="py-3 px-2 sm:px-4 font-mono">{player.wins}</td>
+                          <td className="py-3 px-2 sm:px-4">{player.player_name || 'Unbekannt'}</td>
                           <td className="py-3 px-2 sm:px-4 font-mono">
-                            {player.games > 0
-                              ? `${Math.round(player.winRate)}%`
+                            {player.win_percentage !== undefined
+                              ? `${player.win_percentage.toFixed(1)}%`
                               : '-'}
                           </td>
+                          <td className="py-3 px-2 sm:px-4 font-mono">{player.games_won || 0}</td>
+                          <td className="py-3 px-2 sm:px-4 font-mono">{player.games_played || 0}</td>
                         </tr>
                       ))}
                     </tbody>

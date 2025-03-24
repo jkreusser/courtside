@@ -46,8 +46,8 @@ body {
   -webkit-text-size-adjust: 100%;
   -webkit-font-smoothing: antialiased;
   -webkit-overflow-scrolling: touch;
-  touch-action: manipulation;
-  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  overscroll-behavior-y: auto;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -113,9 +113,9 @@ textarea {
 
 .page-content {
   position: relative;
+  overflow-y: auto;
 
   @media (min-width: 768px) {
-    min-height: calc(100vh - 160px);
     transition: opacity var(--page-transition-duration)
       var(--page-transition-easing);
     will-change: opacity;
@@ -190,9 +190,8 @@ iframe {
 main,
 section,
 div {
-  /* Verhindert Layout-Shifts */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 500px;
+  /* Verbesserte Scrollbarkeit */
+  box-sizing: border-box;
 }
 
 .mobile-menu-enter {
@@ -366,4 +365,12 @@ div {
   height: 3px;
   background-color: var(--color-primary);
   border-radius: 0 0 3px 3px;
+}
+
+/* Grundlegende Layout-Stabilität */
+html,
+body {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
 }

@@ -38,8 +38,8 @@ export const metadata = {
 export const viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  maximumScale: 5,
+  userScalable: true,
   viewportFit: "cover",
 };
 
@@ -105,11 +105,11 @@ export default function RootLayout({ children }) {
           <Suspense fallback={null}>
             <PageTransitionScript />
           </Suspense>
-          <div className="flex flex-col min-h-screen">
+          <div className="flex flex-col min-h-screen overflow-y-auto">
             <Header />
-            <main className="flex-1 container mx-auto px-4 py-4 sm:py-8">
+            <main className="flex-1 container mx-auto px-4 py-4 sm:py-8 overflow-y-auto">
               <div className="page-transition-wrapper">
-                <div className="page-content">
+                <div className="page-content overflow-y-auto">
                   {children}
                 </div>
               </div>
