@@ -7,7 +7,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
  * Diese Komponente fügt clientseitiges JavaScript hinzu, um Seitenübergänge 
  * zu optimieren und Flackern zu reduzieren.
  */
-export default function PageTransitionScript() {
+function PageTransitionScriptContent() {
     const pathname = usePathname();
     const searchParams = useSearchParams();
 
@@ -85,4 +85,11 @@ export default function PageTransitionScript() {
     }, [pathname, searchParams]);
 
     return null;
+}
+
+// Export der Komponente als Suspense-kompatible Funktion
+export default function PageTransitionScript() {
+    return (
+        <PageTransitionScriptContent />
+    );
 } 

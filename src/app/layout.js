@@ -5,6 +5,7 @@ import Header from "@/components/layout/Header";
 import ToastProvider from "@/components/ui/ToastProvider";
 import Link from "next/link";
 import PageTransitionScript from "@/components/PageTransitionScript";
+import { Suspense } from "react";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -101,7 +102,9 @@ export default function RootLayout({ children }) {
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AuthProvider>
           <ToastProvider />
-          <PageTransitionScript />
+          <Suspense fallback={null}>
+            <PageTransitionScript />
+          </Suspense>
           <div className="flex flex-col min-h-screen">
             <Header />
             <main className="flex-1 container mx-auto px-4 py-4 sm:py-8">

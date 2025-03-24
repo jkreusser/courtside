@@ -12,12 +12,19 @@ const nextConfig = {
     reactStrictMode: false,
     experimental: {
         scrollRestoration: true,
-        optimizeCss: true,
+        // Deaktiviere CSS-Optimierung um critters-Probleme zu vermeiden
+        // optimizeCss: true,
         optimizePackageImports: ['react-dom', 'react', 'date-fns'],
-        nextScriptWorkers: true,
+        // nextScriptWorkers: true, // Entfernt, da es Partytown erfordert
     },
     output: 'standalone',
     compress: true,
+    webpack: (config, { dev, isServer }) => {
+        if (!dev && !isServer) {
+            config.optimization.minimize = true;
+        }
+        return config;
+    },
     headers: async () => {
         return [
             {

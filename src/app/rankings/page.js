@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { getRankings, getDailyRankings } from '@/lib/supabase';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Select, SelectOption } from '@/components/ui/Select';
@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 import { format, subDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 
-export default function RankingsPage() {
+function RankingsContent() {
     const [allTimeRankings, setAllTimeRankings] = useState([]);
     const [dailyRankings, setDailyRankings] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -241,5 +241,13 @@ export default function RankingsPage() {
                 </ul>
             </div>
         </div>
+    );
+}
+
+export default function RankingsPage() {
+    return (
+        <Suspense fallback={<div className="text-center py-12">Ranglisten werden geladen...</div>}>
+            <RankingsContent />
+        </Suspense>
     );
 } 

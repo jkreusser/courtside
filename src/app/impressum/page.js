@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Suspense } from 'react';
 
-export default function ImpressumPage() {
+function ImpressumContent() {
     return (
         <div className="max-w-3xl mx-auto">
             <h1 className="text-2xl sm:text-3xl font-bold mb-6">Impressum</h1>
@@ -55,5 +56,13 @@ export default function ImpressumPage() {
                 </CardContent>
             </Card>
         </div>
+    );
+}
+
+export default function ImpressumPage() {
+    return (
+        <Suspense fallback={<div className="text-center py-12">Impressum wird geladen...</div>}>
+            <ImpressumContent />
+        </Suspense>
     );
 } 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
@@ -9,7 +9,8 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 
-export default function GamesPage() {
+// Wrapper-Komponente, die den Suspense-Boundary nutzt
+function GamesPageContent() {
     const { user, loading: authLoading } = useAuth();
     const router = useRouter();
     const [games, setGames] = useState([]);
@@ -534,5 +535,14 @@ export default function GamesPage() {
                 </Card>
             </div>
         </div>
+    );
+}
+
+// Haupt-Export-Komponente mit Suspense-Boundary
+export default function GamesPage() {
+    return (
+        <Suspense fallback={<div className="text-center py-12">Spiele werden geladen...</div>}>
+            <GamesPageContent />
+        </Suspense>
     );
 }

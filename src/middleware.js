@@ -55,8 +55,8 @@ export async function middleware(request) {
     );
 
     // Geschützte Routen
-    const protectedRoutes = ['/admin', '/rankings/manage'];
-    const adminRoutes = ['/admin'];
+    const protectedRoutes = ['/rankings/manage'];
+    const adminRoutes = [];
     const isProtectedRoute = protectedRoutes.some(route =>
         request.nextUrl.pathname.startsWith(route)
     );
