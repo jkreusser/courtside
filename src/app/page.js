@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useState, useEffect, useMemo } from 'react';
+import { supabase, getPlayers } from '@/lib/supabase';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Link from 'next/link';
@@ -63,10 +63,8 @@ export default function DashboardPage() {
         setLoading(true);
         setError(null);
 
-        // Lade alle Spieler - ohne Benutzerabhängigkeit
-        const { data: playersData, error: playersError } = await supabase
-          .from('players')
-          .select('*');
+        // Verwende die optimierte getPlayers-Funktion mit Caching
+        const { data: playersData, error: playersError } = await getPlayers();
 
         if (playersError) {
           console.error('Fehler beim Laden der Spieler:', JSON.stringify(playersError));
@@ -82,14 +80,19 @@ export default function DashboardPage() {
         }
 
         try {
-          // Versuche, die abgeschlossenen Spiele zu laden - ohne Benutzerabhängigkeit
+          // Verbesserte Spiele-Abfrage mit Limitierung und Attributselektion
           const { data: gamesData, error: gamesError } = await supabase
             .from('games')
             .select(`
-              *,
-              scores(*)
+              id, 
+              player1_id, 
+              player2_id, 
+              winner_id, 
+              status,
+              scores(id, player1_score, player2_score)
             `)
-            .eq('status', 'completed');
+            .eq('status', 'completed')
+            .limit(100); // Limitiere die Anzahl, erhöhe bei Bedarf
 
           // Wenn es einen Fehler gibt oder keine Spiele existieren, zeige nur die Spieler an
           if (gamesError) {
@@ -206,7 +209,7 @@ export default function DashboardPage() {
     };
 
     fetchPlayers();
-  }, []);
+  }, []);  // Keine Abhängigkeiten, lädt nur einmal beim Mounten
 
   if (authLoading) {
     return <div className="text-center py-8">Lade...</div>;
@@ -312,7 +315,7 @@ export default function DashboardPage() {
                         <th className="text-left py-3 px-2 sm:px-4">Spieler</th>
                         <th className="text-left py-3 px-2 sm:px-4">Spiele</th>
                         <th className="text-left py-3 px-2 sm:px-4">Siege</th>
-                        <th className="text-left py-3 px-2 sm:px-4">Siegrate</th>
+                        <th className="text-left py-3 px-2 sm:px-4">Winrate</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -427,13 +430,13 @@ export default function DashboardPage() {
         {/* Performance Over Time - Win Rate */}
         <Card>
           <CardHeader>
-            <CardTitle>Siegrate</CardTitle>
+            <CardTitle>Winrate</CardTitle>
             <CardDescription>
               Deine Erfolgsquote im Zeitverlauf
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            {games.length > 3 && generatePerformanceData(games, user.id).length > 1 ? (
+            {games.length >= 3 && generatePerformanceData(games, user.id).length > 1 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart
                   data={generatePerformanceData(games, user.id)}
@@ -467,19 +470,19 @@ export default function DashboardPage() {
                     }}
                     itemStyle={{ color: '#e5e7eb' }}
                     formatter={(value, name) => {
-                      if (name === 'siegRate') return [`${Math.round(value * 100)}%`, 'Siegrate'];
+                      if (name === 'winrate') return [`${Math.round(value * 100)}%`, 'Winrate'];
                       return [value, name];
                     }}
                     labelStyle={{ color: '#e5e7eb', fontWeight: 'bold', marginBottom: '5px' }}
                   />
                   <Line
                     type="monotone"
-                    dataKey="siegRate"
+                    dataKey="winrate"
                     stroke="#10b981"
                     strokeWidth={3}
                     dot={{ stroke: '#10b981', strokeWidth: 2, r: 4, fill: '#1c1c1e' }}
                     activeDot={{ r: 6, stroke: '#059669', strokeWidth: 2, fill: '#10b981' }}
-                    name="Siegrate"
+                    name="Winrate"
                     filter="url(#shadow)"
                     fillOpacity={0.3}
                     fill="#0A100E"
@@ -489,7 +492,7 @@ export default function DashboardPage() {
             ) : (
               <div className="flex flex-col h-full items-center justify-center text-center text-zinc-500">
                 <p className="mb-2">Noch nicht genügend Spiele für Statistiken.</p>
-                <p className="text-sm">Spiele mindestens 3 Spiele, um deine Erfolgsquote zu sehen.</p>
+                <p className="text-sm">Spiele an mindestens zwei Tagen, um deine Winrate zu sehen.</p>
               </div>
             )}
           </CardContent>
@@ -504,7 +507,7 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            {games.length > 3 && generatePointDifferenceData(games, user.id).length > 1 ? (
+            {games.length >= 3 && generatePointDifferenceData(games, user.id).length >= 3 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart
                   data={generatePointDifferenceData(games, user.id)}
@@ -662,7 +665,7 @@ function generatePerformanceData(games, userId) {
       }
     });
 
-    // Berechne die Siegrate für diese Periode
+    // Berechne die Winrate für diese Periode
     const periodWinRate = gamesInPeriod > 0 ? wins / gamesInPeriod : 0;
 
     // Berechne die durchschnittliche Punktedifferenz pro Spiel für diese Periode
@@ -674,7 +677,7 @@ function generatePerformanceData(games, userId) {
     // Füge die Daten für diese Periode zum Chart hinzu
     chartData.push({
       date: period.displayDate,
-      siegRate: periodWinRate,
+      winrate: periodWinRate,
       punkteDifferenz: Math.round(avgPointDiff),
       spiele: gamesInPeriod,
       kumulativ: chartData.length > 0

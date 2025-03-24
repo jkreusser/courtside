@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { getProfile, updateProfile, updateAccessCode } from '@/lib/supabase';
+import { getProfile, updateProfile, updateAccessCode, signOut } from '@/lib/supabase';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -165,6 +165,22 @@ export default function ProfilePage() {
         }
     };
 
+    // Benutzer abmelden
+    const handleSignOut = async () => {
+        try {
+            const { error } = await signOut();
+            if (error) {
+                toast.error('Fehler beim Abmelden');
+            } else {
+                toast.success('Erfolgreich abgemeldet');
+                router.push('/');
+            }
+        } catch (error) {
+            toast.error('Fehler beim Abmelden');
+            console.error(error);
+        }
+    };
+
     // Wenn Benutzer nicht angemeldet ist oder Profil geladen wird
     if (profileLoading || !user || !profile) {
         return (
@@ -295,6 +311,40 @@ export default function ProfilePage() {
                             {isChangingAccessCode ? 'Wird gespeichert...' : 'Zugangscode ändern'}
                         </Button>
                     </form>
+                </CardContent>
+            </Card>
+
+            {/* Abmelden-Karte */}
+            <Card className="border border-zinc-800">
+                <CardHeader>
+                    <CardTitle>Konto</CardTitle>
+                    <CardDescription>
+                        Abmelden und andere Kontoaktionen.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="space-y-4">
+                        <Button
+                            onClick={handleSignOut}
+                            variant="primary"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                strokeWidth={1.5}
+                                stroke="currentColor"
+                                className="w-5 h-5 mr-2"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
+                                />
+                            </svg>
+                            Abmelden
+                        </Button>
+                    </div>
                 </CardContent>
             </Card>
         </div>

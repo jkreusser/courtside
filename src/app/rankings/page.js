@@ -21,7 +21,7 @@ export default function RankingsPage() {
             try {
                 setLoading(true);
 
-                // Lade die Gesamtrangliste
+                // Lade die Gesamtrangliste mit optimierter Funktion
                 const { data: allTimeData, error: allTimeError } = await getRankings();
 
                 if (allTimeError) {
@@ -43,7 +43,7 @@ export default function RankingsPage() {
                 await fetchDailyRanking(selectedDate);
             } catch (error) {
                 console.error('Ein Fehler ist aufgetreten:', error);
-                toast.error('Ein Fehler ist aufgetreten');
+                toast.error('Ein Fehler ist aufgetreten beim Laden der Ranglisten');
             } finally {
                 setLoading(false);
             }
@@ -52,24 +52,48 @@ export default function RankingsPage() {
         fetchRankings();
     }, [selectedDate]); // Wichtig: selectedDate als Abhängigkeit hinzufügen
 
-    // Lade tägliches Ranking für einen bestimmten Tag
+    // Lade tägliches Ranking für einen bestimmten Tag mit Fehlerwiederholung
     const fetchDailyRanking = async (date) => {
-        try {
-            setLoading(true);
-            const { data, error } = await getDailyRankings(date);
+        let retryCount = 0;
+        const maxRetries = 3;
+        const retryDelay = 1000; // 1 Sekunde Verzögerung zwischen Versuchen
 
-            if (error) {
+        const attemptFetch = async () => {
+            try {
+                setLoading(true);
+                const { data, error } = await getDailyRankings(date);
+
+                if (error) {
+                    if (retryCount < maxRetries) {
+                        console.warn(`Fehler beim Laden des täglichen Rankings. Wiederhole (${retryCount + 1}/${maxRetries})...`);
+                        retryCount++;
+                        await new Promise(resolve => setTimeout(resolve, retryDelay * retryCount));
+                        return attemptFetch();
+                    }
+
+                    console.error('Fehler beim Laden des täglichen Rankings:', error);
+                    toast.error('Fehler beim Laden des täglichen Rankings');
+                    setDailyRankings([]);
+                } else {
+                    setDailyRankings(data || []);
+                }
+            } catch (error) {
+                if (retryCount < maxRetries) {
+                    console.warn(`Unerwarteter Fehler. Wiederhole (${retryCount + 1}/${maxRetries})...`);
+                    retryCount++;
+                    await new Promise(resolve => setTimeout(resolve, retryDelay * retryCount));
+                    return attemptFetch();
+                }
+
                 console.error('Fehler beim Laden des täglichen Rankings:', error);
                 toast.error('Fehler beim Laden des täglichen Rankings');
-            } else {
-                setDailyRankings(data || []);
+                setDailyRankings([]);
+            } finally {
+                setLoading(false);
             }
-        } catch (error) {
-            console.error('Fehler beim Laden des täglichen Rankings:', error);
-            toast.error('Fehler beim Laden des täglichen Rankings');
-        } finally {
-            setLoading(false);
-        }
+        };
+
+        await attemptFetch();
     };
 
     // Behandle Änderung des ausgewählten Datums
@@ -110,7 +134,8 @@ export default function RankingsPage() {
                                         <tr className="border-b border-zinc-800">
                                             <th className="text-left py-3 px-4">Rang</th>
                                             <th className="text-left py-3 px-4">Spieler</th>
-                                            <th className="text-left py-3 px-4">Punkte</th>
+                                            <th className="text-left py-3 px-4">Winrate</th>
+                                            <th className="text-left py-3 px-4">Siege</th>
                                             <th className="text-left py-3 px-4">Spiele</th>
                                         </tr>
                                     </thead>
@@ -124,8 +149,11 @@ export default function RankingsPage() {
                                                     {index + 1}
                                                 </td>
                                                 <td className="py-3 px-4">{player.player_name}</td>
-                                                <td className="py-3 px-4 font-mono text-primary">{player.points}</td>
-                                                <td className="py-3 px-4 font-mono">{player.matches_played}</td>
+                                                <td className="py-3 px-4 font-mono text-primary">
+                                                    {player.win_percentage !== undefined ? `${player.win_percentage.toFixed(1)}%` : '0.0%'}
+                                                </td>
+                                                <td className="py-3 px-4 font-mono">{player.games_won || 0}</td>
+                                                <td className="py-3 px-4 font-mono">{player.games_played || 0}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -174,7 +202,8 @@ export default function RankingsPage() {
                                         <tr className="border-b border-zinc-800">
                                             <th className="text-left py-3 px-4">Rang</th>
                                             <th className="text-left py-3 px-4">Spieler</th>
-                                            <th className="text-left py-3 px-4">Punkte</th>
+                                            <th className="text-left py-3 px-4">Winrate</th>
+                                            <th className="text-left py-3 px-4">Siege</th>
                                             <th className="text-left py-3 px-4">Spiele</th>
                                         </tr>
                                     </thead>
@@ -188,8 +217,11 @@ export default function RankingsPage() {
                                                     {index + 1}
                                                 </td>
                                                 <td className="py-3 px-4">{player.player_name}</td>
-                                                <td className="py-3 px-4 font-mono text-primary">{player.points}</td>
-                                                <td className="py-3 px-4 font-mono">{player.matches_played}</td>
+                                                <td className="py-3 px-4 font-mono text-primary">
+                                                    {player.win_percentage !== undefined ? `${player.win_percentage.toFixed(1)}%` : '0.0%'}
+                                                </td>
+                                                <td className="py-3 px-4 font-mono">{player.games_won || 0}</td>
+                                                <td className="py-3 px-4 font-mono">{player.games_played || 0}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -201,10 +233,11 @@ export default function RankingsPage() {
             </div>
 
             <div className="p-6 rounded-lg mt-8 border border-zinc-800">
-                <h2 className="text-xl font-semibold mb-4">Punktesystem</h2>
+                <h2 className="text-xl font-semibold mb-4">Ranglisten-Information</h2>
                 <ul className="list-disc list-inside space-y-2">
-                    <li>Gewonnenes Spiel: <span className="text-primary font-semibold">3 Punkte</span></li>
-                    <li>Verlorenes Spiel: <span className="font-semibold">0 Punkte</span></li>
+                    <li>Die Rangliste wird nach <span className="text-primary font-semibold">Winrate</span> sortiert</li>
+                    <li>Bei gleicher Winrate entscheidet die <span className="font-semibold">Anzahl der Siege</span></li>
+                    <li>Die Winrate wird berechnet als: <span className="font-semibold">Siege / Gespielte Spiele × 100%</span></li>
                 </ul>
             </div>
         </div>

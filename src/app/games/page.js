@@ -14,7 +14,7 @@ export default function GamesPage() {
     const router = useRouter();
     const [games, setGames] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [filter, setFilter] = useState('all'); // 'all', 'active', 'completed'
+    const [filter, setFilter] = useState('all'); // 'all', 'active', 'completed', 'my_games'
     const [displayCount, setDisplayCount] = useState(5); // Anzahl der anzuzeigenden Spiele
     const [scheduleDisplayCount, setScheduleDisplayCount] = useState(5); // Anzahl der anzuzeigenden Spielpläne
 
@@ -38,25 +38,73 @@ export default function GamesPage() {
             try {
                 setLoading(true);
 
-                // Lade Spiele mit Informationen über die Spieler und Ergebnisse
+                // Verbesserte Spiele-Abfrage mit Limitierung, Paginierung und spezifischer Attributselektion
+                const PAGE_SIZE = 20; // Anzahl der Spiele pro Seite
                 const { data, error } = await supabase
                     .from('games')
                     .select(`
-                        *,
-                        player1:player1_id(*),
-                        player2:player2_id(*),
-                        scores(*)
+                        id, 
+                        status, 
+                        created_at,
+                        player1_id, 
+                        player2_id, 
+                        winner_id,
+                        player1:player1_id(id, name),
+                        player2:player2_id(id, name),
+                        scores(id, player1_score, player2_score)
                     `)
-                    .order('created_at', { ascending: false });
+                    .order('created_at', { ascending: false })
+                    .range(0, PAGE_SIZE - 1); // Erste Seite laden
 
                 if (error) {
                     console.error('Fehler beim Laden der Spiele:', error);
                     toast.error('Fehler beim Laden der Spiele');
 
-                    // Warte kurz und versuche es nochmal
-                    setTimeout(() => {
+                    // Wiederholungsversuch mit exponentieller Verzögerung
+                    let retryCount = 0;
+                    const maxRetries = 3;
+                    const retryWithBackoff = async () => {
+                        if (retryCount >= maxRetries) return;
+
+                        retryCount++;
+                        const delay = 1000 * Math.pow(2, retryCount - 1); // Exponentielles Backoff
+                        console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
+
+                        await new Promise(resolve => setTimeout(resolve, delay));
+
+                        const { data: retryData, error: retryError } = await supabase
+                            .from('games')
+                            .select(`
+                                id, 
+                                status, 
+                                created_at,
+                                player1_id, 
+                                player2_id, 
+                                winner_id,
+                                player1:player1_id(id, name),
+                                player2:player2_id(id, name),
+                                scores(id, player1_score, player2_score)
+                            `)
+                            .order('created_at', { ascending: false })
+                            .range(0, PAGE_SIZE - 1);
+
+                        if (!retryError) {
+                            setGames(retryData || []);
+                            setLoading(false);
+                            return true;
+                        }
+
+                        if (retryCount < maxRetries) {
+                            return retryWithBackoff();
+                        }
+
+                        return false;
+                    };
+
+                    const success = await retryWithBackoff();
+                    if (!success) {
                         router.refresh();
-                    }, 1500);
+                    }
                     return;
                 }
 
@@ -68,7 +116,7 @@ export default function GamesPage() {
                 // Warte kurz und versuche es nochmal
                 setTimeout(() => {
                     router.refresh();
-                }, 1500);
+                }, 3000);
             } finally {
                 setLoading(false);
             }
@@ -136,6 +184,7 @@ export default function GamesPage() {
     const filteredGames = games.filter(game => {
         if (filter === 'active') return game.status === 'in_progress';
         if (filter === 'completed') return game.status === 'completed';
+        if (filter === 'my_games') return game.player1_id === user.id || game.player2_id === user.id;
         return true; // 'all'
     });
 
@@ -193,6 +242,14 @@ export default function GamesPage() {
                     onClick={() => setFilter('all')}
                 >
                     Alle
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className={`${filter === 'my_games' ? 'bg-zinc-800 text-white' : 'bg-zinc-900 text-zinc-400'} border-0 whitespace-nowrap`}
+                    onClick={() => setFilter('my_games')}
+                >
+                    Meine Spiele
                 </Button>
                 <Button
                     variant="outline"

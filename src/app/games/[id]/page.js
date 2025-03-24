@@ -81,6 +81,7 @@ export default function GameDetailPage({ params }) {
                 setScores(sortedScores);
 
                 // Überprüfe, ob der aktuelle Benutzer ein Teilnehmer des Spiels ist
+                // Beide Teilnehmer dürfen das Spiel bearbeiten und löschen
                 const userIsParticipant = user.id === data.player1_id || user.id === data.player2_id;
                 setIsParticipant(userIsParticipant);
             } catch (error) {
@@ -569,6 +570,18 @@ export default function GameDetailPage({ params }) {
         try {
             setIsDeleting(true);
 
+            // Lösche die player_achievements, die mit diesem Spiel verbunden sein könnten
+            const { error: achievementsError } = await supabase
+                .from('player_achievements')
+                .delete()
+                .in('achievement_id', ['first_win', 'underdog', 'streak_3', 'streak_5', 'streak_10', 'daily_winner'])
+                .eq('player_id', user.id)
+                .gt('achieved_at', new Date(game.created_at).toISOString());
+
+            if (achievementsError) {
+                console.error('Fehler beim Löschen der Achievements:', achievementsError);
+            }
+
             // Lösche zuerst die Ergebnisse
             const { error: scoresError } = await supabase
                 .from('scores')
@@ -576,6 +589,7 @@ export default function GameDetailPage({ params }) {
                 .eq('game_id', id);
 
             if (scoresError) {
+                console.error('Fehler beim Löschen der Ergebnisse:', scoresError);
                 throw scoresError;
             }
 
@@ -586,14 +600,17 @@ export default function GameDetailPage({ params }) {
                 .eq('id', id);
 
             if (gameError) {
+                console.error('Fehler beim Löschen des Spiels:', gameError);
                 throw gameError;
             }
 
             toast.success('Spiel erfolgreich gelöscht');
-            router.push('/games');
+
+            // Direkte Navigation statt Timeout
+            window.location.href = '/games';
         } catch (error) {
             toast.error('Fehler beim Löschen des Spiels');
-            console.error(error);
+            console.error('Fehler beim Löschen des Spiels:', error);
         } finally {
             setIsDeleting(false);
         }

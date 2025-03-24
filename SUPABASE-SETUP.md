@@ -34,6 +34,27 @@ CREATE TABLE public.matches (
     created_by UUID REFERENCES auth.users(id)
 );
 
+-- Games-Tabelle
+CREATE TABLE public.games (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    player1_id UUID REFERENCES public.players(id) ON DELETE CASCADE,
+    player2_id UUID REFERENCES public.players(id) ON DELETE CASCADE,
+    winner_id UUID REFERENCES public.players(id) ON DELETE SET NULL,
+    status TEXT DEFAULT 'in_progress' NOT NULL,
+    sets_to_win INTEGER DEFAULT 3 NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Scores-Tabelle (für Spielergebnisse)
+CREATE TABLE public.scores (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    game_id UUID REFERENCES public.games(id) ON DELETE CASCADE,
+    player1_score INTEGER NOT NULL,
+    player2_score INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
 -- Spielplan-Tabellen
 CREATE TABLE public.schedules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -65,46 +86,30 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
-    WITH matches_data AS (
+    WITH games_data AS (
         SELECT
             p.id as player_id,
             p.name as player_name,
-            COUNT(*) as games_played,
-            SUM(CASE 
-                WHEN m.player1_id = p.id AND m.score_player1 > m.score_player2 THEN 1
-                WHEN m.player2_id = p.id AND m.score_player2 > m.score_player1 THEN 1
-                ELSE 0
-            END) as games_won,
-            MAX(m.created_at) as last_played
+            COUNT(g.*)::INTEGER as games_played,
+            SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END)::INTEGER as games_won,
+            MAX(g.updated_at) as last_played
         FROM
             players p
-        LEFT JOIN (
-            SELECT * FROM matches 
-            UNION ALL
-            SELECT 
-                id, 
-                player2_id as player1_id, 
-                player1_id as player2_id, 
-                score_player2 as score_player1, 
-                score_player1 as score_player2,
-                game_date,
-                created_at,
-                created_by
-            FROM matches
-        ) m ON p.id = m.player1_id
+        JOIN games g ON (p.id = g.player1_id OR p.id = g.player2_id)
+        WHERE g.status = 'completed'
         GROUP BY p.id, p.name
     )
     SELECT
-        md.player_id,
-        md.player_name,
-        md.games_played,
-        md.games_won,
-        CASE WHEN md.games_played > 0 THEN (md.games_won::NUMERIC / md.games_played) * 100 ELSE 0 END as win_percentage,
-        md.last_played
+        gd.player_id,
+        gd.player_name,
+        gd.games_played,
+        gd.games_won,
+        CASE WHEN gd.games_played > 0 THEN (gd.games_won::NUMERIC / gd.games_played) * 100 ELSE 0 END as win_percentage,
+        gd.last_played
     FROM
-        matches_data md
+        games_data gd
     ORDER BY
-        win_percentage DESC, games_played DESC, player_name ASC;
+        win_percentage DESC, games_won DESC, player_name ASC;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -118,45 +123,28 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
-    WITH matches_data AS (
+    WITH games_data AS (
         SELECT
             p.id as player_id,
             p.name as player_name,
-            COUNT(*) as games_played,
-            SUM(CASE 
-                WHEN m.player1_id = p.id AND m.score_player1 > m.score_player2 THEN 1
-                WHEN m.player2_id = p.id AND m.score_player2 > m.score_player1 THEN 1
-                ELSE 0
-            END) as games_won
+            COUNT(g.*)::INTEGER as games_played,
+            SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END)::INTEGER as games_won
         FROM
             players p
-        LEFT JOIN (
-            SELECT * FROM matches WHERE game_date = target_date
-            UNION ALL
-            SELECT 
-                id, 
-                player2_id as player1_id, 
-                player1_id as player2_id, 
-                score_player2 as score_player1, 
-                score_player1 as score_player2,
-                game_date,
-                created_at,
-                created_by
-            FROM matches WHERE game_date = target_date
-        ) m ON p.id = m.player1_id
+        JOIN games g ON (p.id = g.player1_id OR p.id = g.player2_id)
+        WHERE g.status = 'completed' AND DATE(g.updated_at) = target_date
         GROUP BY p.id, p.name
-        HAVING COUNT(*) > 0
     )
     SELECT
-        md.player_id,
-        md.player_name,
-        md.games_played,
-        md.games_won,
-        CASE WHEN md.games_played > 0 THEN (md.games_won::NUMERIC / md.games_played) * 100 ELSE 0 END as win_percentage
+        gd.player_id,
+        gd.player_name,
+        gd.games_played,
+        gd.games_won,
+        CASE WHEN gd.games_played > 0 THEN (gd.games_won::NUMERIC / gd.games_played) * 100 ELSE 0 END as win_percentage
     FROM
-        matches_data md
+        games_data gd
     ORDER BY
-        win_percentage DESC, games_played DESC, player_name ASC;
+        win_percentage DESC, games_won DESC, player_name ASC;
 END;
 $$ LANGUAGE plpgsql;
 ```
@@ -172,6 +160,8 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.matches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.schedules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.schedule_matches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.games ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.scores ENABLE ROW LEVEL SECURITY;
 
 -- Policy für Spieler: Jeder kann alle Spieler sehen (auch ohne Anmeldung)
 CREATE POLICY "Jeder kann alle Spieler sehen"
@@ -362,6 +352,64 @@ USING (
     EXISTS (
         SELECT 1 FROM public.profiles 
         WHERE id = auth.uid() AND role = 'admin'
+    )
+);
+
+-- Policy für Games: Jeder kann Games sehen
+CREATE POLICY "Jeder kann Games sehen" 
+ON public.games FOR SELECT 
+TO anon, authenticated
+USING (true);
+
+-- Policy für Games: Authentifizierte Benutzer können Games erstellen
+CREATE POLICY "Authentifizierte Benutzer können Games erstellen" 
+ON public.games FOR INSERT 
+TO authenticated
+WITH CHECK (
+    auth.uid() = player1_id OR auth.uid() = player2_id
+);
+
+-- Policy für Games: Teilnehmer können Games aktualisieren
+CREATE POLICY "Teilnehmer können Games aktualisieren" 
+ON public.games FOR UPDATE 
+TO authenticated
+USING (
+    auth.uid() = player1_id OR auth.uid() = player2_id
+);
+
+-- Policy für Games: Teilnehmer können Games löschen
+CREATE POLICY "Teilnehmer können Games löschen" 
+ON public.games FOR DELETE 
+TO authenticated
+USING (
+    auth.uid() = player1_id OR auth.uid() = player2_id
+);
+
+-- Policy für Scores: Jeder kann Scores sehen
+CREATE POLICY "Jeder kann Scores sehen" 
+ON public.scores FOR SELECT 
+TO anon, authenticated
+USING (true);
+
+-- Policy für Scores: Teilnehmer können Scores erstellen
+CREATE POLICY "Teilnehmer können Scores erstellen" 
+ON public.scores FOR INSERT 
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.games
+        WHERE id = game_id AND (player1_id = auth.uid() OR player2_id = auth.uid())
+    )
+);
+
+-- Policy für Scores: Teilnehmer können Scores löschen
+CREATE POLICY "Teilnehmer können Scores löschen" 
+ON public.scores FOR DELETE 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.games
+        WHERE id = game_id AND (player1_id = auth.uid() OR player2_id = auth.uid())
     )
 );
 ```

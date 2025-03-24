@@ -452,7 +452,7 @@ export async function getProfile(userId) {
         const { data: playerData, error: playerError } = await supabase
             .from('players')
             .select('*')
-            .eq('user_id', userId)
+            .eq('id', userId)
             .single();
 
         // Kombiniere die Daten, wenn playerData existiert
@@ -488,28 +488,134 @@ export async function updateProfile(userId, updates) {
     }
 }
 
+// Cache für Abfrageergebnisse mit Ablaufzeiten
+const queryCache = {
+    players: { data: null, timestamp: 0 },
+    rankings: { data: null, timestamp: 0 },
+    dailyRankings: { data: {}, timestamp: {} }
+};
+
+// Cache-Gültigkeitsdauer in Millisekunden
+const CACHE_DURATION = 5 * 60 * 1000; // 5 Minuten
+
+// Hilfsfunktion für Wiederholungsversuche bei Datenbankabfragen
+async function retryQuery(queryFn, maxRetries = 3, delayMs = 500) {
+    let lastError = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const result = await queryFn();
+            return result;
+        } catch (error) {
+            console.warn(`Datenbankabfrage fehlgeschlagen (Versuch ${attempt + 1}/${maxRetries}):`, error);
+            lastError = error;
+            if (attempt < maxRetries - 1) {
+                await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+            }
+        }
+    }
+    throw lastError;
+}
+
 // Hilfsfunktionen für Datenbank-Operationen
-export const getPlayers = async () => {
-    const { data, error } = await supabase
-        .from('players')
-        .select('*')
-        .order('name');
+export const getPlayers = async (useCache = true) => {
+    // Prüfe Cache, wenn erlaubt
+    if (useCache &&
+        queryCache.players.data &&
+        Date.now() - queryCache.players.timestamp < CACHE_DURATION) {
+        return { data: queryCache.players.data, error: null };
+    }
 
-    return { data, error };
+    try {
+        const result = await retryQuery(async () => {
+            return await supabase
+                .from('players')
+                .select('id, name, email')  // Explizit nur benötigte Felder auswählen
+                .order('name');
+        });
+
+        // Aktualisiere Cache
+        if (result.data && !result.error) {
+            queryCache.players.data = result.data;
+            queryCache.players.timestamp = Date.now();
+        }
+
+        return result;
+    } catch (error) {
+        console.error('Fehler beim Laden der Spieler (nach Wiederholungen):', error);
+        return { data: null, error };
+    }
 };
 
-export const getRankings = async () => {
-    const { data, error } = await supabase
-        .rpc('get_all_time_rankings');
+export const getRankings = async (useCache = true, limit = 50) => {
+    // Prüfe Cache, wenn erlaubt
+    if (useCache &&
+        queryCache.rankings.data &&
+        Date.now() - queryCache.rankings.timestamp < CACHE_DURATION) {
+        return { data: queryCache.rankings.data, error: null };
+    }
 
-    return { data, error };
+    try {
+        const result = await retryQuery(async () => {
+            return await supabase
+                .rpc('get_all_time_rankings')
+                .limit(limit);  // Begrenze die Ergebnisse
+        });
+
+        // Aktualisiere Cache
+        if (result.data && !result.error) {
+            queryCache.rankings.data = result.data;
+            queryCache.rankings.timestamp = Date.now();
+        }
+
+        return result;
+    } catch (error) {
+        console.error('Fehler beim Laden der Rangliste (nach Wiederholungen):', error);
+        return { data: null, error };
+    }
 };
 
-export const getDailyRankings = async (date) => {
-    const { data, error } = await supabase
-        .rpc('get_daily_rankings', { target_date: date });
+export const getDailyRankings = async (date, useCache = true, limit = 50) => {
+    // Prüfe Cache, wenn erlaubt
+    if (useCache &&
+        queryCache.dailyRankings.data[date] &&
+        Date.now() - queryCache.dailyRankings.timestamp[date] < CACHE_DURATION) {
+        return { data: queryCache.dailyRankings.data[date], error: null };
+    }
 
-    return { data, error };
+    try {
+        const result = await retryQuery(async () => {
+            return await supabase
+                .rpc('get_daily_rankings', { target_date: date })
+                .limit(limit);  // Begrenze die Ergebnisse
+        });
+
+        // Aktualisiere Cache
+        if (result.data && !result.error) {
+            queryCache.dailyRankings.data[date] = result.data;
+            queryCache.dailyRankings.timestamp[date] = Date.now();
+        }
+
+        return result;
+    } catch (error) {
+        console.error(`Fehler beim Laden des Rankings für ${date} (nach Wiederholungen):`, error);
+        return { data: null, error };
+    }
+};
+
+// Cache invalidieren bei Aktualisierung der Daten
+export const invalidateCache = (key = null) => {
+    if (key === 'players' || key === null) {
+        queryCache.players.data = null;
+        queryCache.players.timestamp = 0;
+    }
+    if (key === 'rankings' || key === null) {
+        queryCache.rankings.data = null;
+        queryCache.rankings.timestamp = 0;
+    }
+    if (key === 'dailyRankings' || key === null) {
+        queryCache.dailyRankings.data = {};
+        queryCache.dailyRankings.timestamp = {};
+    }
 };
 
 export const getUserRole = async (userId) => {

@@ -7,12 +7,80 @@ import { signOut } from '@/lib/supabase';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Header() {
     const { user, isAdmin } = useAuth();
     const pathname = usePathname();
+    const router = useRouter();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [isAnimating, setIsAnimating] = useState(false);
+    const [isMobileView, setIsMobileView] = useState(false);
+    const [currentPathname, setCurrentPathname] = useState(pathname);
+    const [pageTransition, setPageTransition] = useState(false);
+
+    // Prüfe, ob wir auf mobilen Geräten sind
+    useEffect(() => {
+        const checkMobile = () => {
+            setIsMobileView(window.innerWidth < 768);
+        };
+
+        // Initial check
+        checkMobile();
+
+        // Add resize listener
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
+    // Verfolge Pfadänderungen für die Animation
+    useEffect(() => {
+        if (pathname !== currentPathname && isMobileView) {
+            // Seite wechselt, Animation starten
+            setPageTransition(true);
+
+            // Nach Animation aufräumen
+            const timer = setTimeout(() => {
+                setPageTransition(false);
+                setCurrentPathname(pathname);
+            }, 300);
+
+            return () => clearTimeout(timer);
+        } else {
+            setCurrentPathname(pathname);
+        }
+    }, [pathname, currentPathname, isMobileView]);
+
+    // Benutzerdefinierte Link-Komponente mit Übergangsanimation
+    const AnimatedLink = ({ href, children, className }) => {
+        const handleClick = (e) => {
+            // Wenn wir bereits auf der Seite sind, zu der wir navigieren wollen, nichts tun
+            if (pathname === href) {
+                e.preventDefault();
+                return;
+            }
+
+            if (isMobileView) {
+                e.preventDefault();
+                setPageTransition(true);
+
+                // Verzögerte Navigation
+                setTimeout(() => {
+                    router.push(href);
+                }, 150);
+            }
+        };
+
+        return (
+            <Link
+                href={href}
+                className={className}
+                onClick={handleClick}
+            >
+                {children}
+            </Link>
+        );
+    };
 
     // Behandle die Schließanimation
     const handleMenuToggle = () => {
@@ -96,75 +164,25 @@ export default function Header() {
     }
 
     return (
-        <header className="bg-zinc-950 border-b border-zinc-800">
-            <div className="container mx-auto px-4 py-4">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                        <Link href="/" className="text-2xl font-bold">
-                            <span className="text-white">Court</span><span className="text-primary">Side</span>
-                        </Link>
-                    </div>
+        <>
+            {/* Page transition overlay */}
+            {pageTransition && isMobileView && (
+                <div className="fixed inset-0 bg-zinc-950 z-50 page-transition"></div>
+            )}
 
-                    {/* Mobile menu button mit Animation */}
-                    <button
-                        className="md:hidden p-2 rounded-md text-zinc-400 hover:text-zinc-500 hover:bg-zinc-800 transition-all duration-200"
-                        onClick={handleMenuToggle}
-                        aria-label={mobileMenuOpen ? "Menü schließen" : "Menü öffnen"}
-                        aria-expanded={mobileMenuOpen}
-                    >
-                        <div className="relative w-6 h-6">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                className={`h-6 w-6 absolute transition-all duration-200 transform ${mobileMenuOpen ? "opacity-0 rotate-90 scale-50" : "opacity-100 rotate-0 scale-100"}`}
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M4 6h16M4 12h16M4 18h16"
-                                />
-                            </svg>
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                className={`h-6 w-6 absolute transition-all duration-200 transform ${mobileMenuOpen ? "opacity-100 rotate-0 scale-100" : "opacity-0 rotate-90 scale-50"}`}
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M6 18L18 6M6 6l12 12"
-                                />
-                            </svg>
-                        </div>
-                    </button>
-
-                    {/* Desktop navigation */}
-                    <nav className="hidden md:flex items-center space-x-1">
-                        {navItems.map((item) => (
-                            <Link
-                                key={item.href}
-                                href={item.href}
-                                className={clsx(
-                                    'px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2',
-                                    pathname === item.href
-                                        ? 'bg-secondary text-primary'
-                                        : 'text-zinc-300 hover:bg-zinc-800'
-                                )}
-                            >
-                                {item.icon}
-                                {item.name}
+            <header className="bg-zinc-950 border-b border-zinc-800">
+                <div className="container mx-auto px-4 py-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                            <Link href="/" className="text-2xl font-bold">
+                                <span className="text-white">Court</span><span className="text-primary">Side</span>
                             </Link>
-                        ))}
+                        </div>
 
-                        {user ? (
-                            <>
-                                <Link
+                        {/* Profil-Icon für Mobile (rechts neben Logo) */}
+                        <div className="flex items-center">
+                            {user && isMobileView && (
+                                <AnimatedLink
                                     href="/profile"
                                     className={clsx(
                                         'p-2 rounded-md flex items-center justify-center',
@@ -188,62 +206,66 @@ export default function Header() {
                                             d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
                                         />
                                     </svg>
-                                </Link>
-                                <a
-                                    onClick={handleSignOut}
-                                    className="p-2 rounded-md text-zinc-300 hover:bg-zinc-800 cursor-pointer flex items-center justify-center"
-                                    title="Abmelden"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        strokeWidth={1.5}
-                                        stroke="currentColor"
-                                        className="w-5 h-5"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
-                                        />
-                                    </svg>
-                                </a>
-                            </>
-                        ) : (
-                            <Link
-                                href="/login"
-                                className="ml-2 px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-zinc-800"
-                            >
-                                Anmelden
-                            </Link>
-                        )}
-                    </nav>
-                </div>
+                                </AnimatedLink>
+                            )}
 
-                {/* Mobile navigation mit Animation */}
-                {(mobileMenuOpen || isAnimating) && (
-                    <nav
-                        className={`mt-4 border-t border-zinc-700 pt-4 md:hidden mobile-menu-enter overflow-hidden transition-all duration-200 ${isAnimating ? 'opacity-0 max-h-0' : 'opacity-100 max-h-screen'}`}
-                    >
-                        <div className="flex flex-col space-y-2">
-                            {navItems.map((item, index) => (
+                            {/* Mobile menu button wird nur angezeigt, wenn isMobileView false ist */}
+                            {!isMobileView && (
+                                <button
+                                    className="md:hidden p-2 rounded-md text-zinc-400 hover:text-zinc-500 hover:bg-zinc-800 transition-all duration-200 ml-2"
+                                    onClick={handleMenuToggle}
+                                    aria-label={mobileMenuOpen ? "Menü schließen" : "Menü öffnen"}
+                                    aria-expanded={mobileMenuOpen}
+                                >
+                                    <div className="relative w-6 h-6">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            className={`h-6 w-6 absolute transition-all duration-200 transform ${mobileMenuOpen ? "opacity-0 rotate-90 scale-50" : "opacity-100 rotate-0 scale-100"}`}
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M4 6h16M4 12h16M4 18h16"
+                                            />
+                                        </svg>
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            className={`h-6 w-6 absolute transition-all duration-200 transform ${mobileMenuOpen ? "opacity-100 rotate-0 scale-100" : "opacity-0 rotate-90 scale-50"}`}
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                    </div>
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Desktop navigation */}
+                        <nav className="hidden md:flex items-center space-x-1">
+                            {navItems.map((item) => (
                                 <Link
                                     key={item.href}
                                     href={item.href}
                                     className={clsx(
-                                        'px-3 py-2 rounded-md text-sm font-medium block mobile-menu-item',
+                                        'px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2',
                                         pathname === item.href
                                             ? 'bg-secondary text-primary'
                                             : 'text-zinc-300 hover:bg-zinc-800'
                                     )}
-                                    onClick={handleMenuToggle}
-                                    style={{ animationDelay: `${0.05 * (index + 1)}s` }}
                                 >
-                                    <div className="flex items-center gap-2">
-                                        {item.icon}
-                                        {item.name}
-                                    </div>
+                                    {item.icon}
+                                    {item.name}
                                 </Link>
                             ))}
 
@@ -252,73 +274,167 @@ export default function Header() {
                                     <Link
                                         href="/profile"
                                         className={clsx(
-                                            'px-3 py-2 rounded-md text-sm font-medium block mobile-menu-item',
+                                            'p-2 rounded-md flex items-center justify-center',
                                             pathname === '/profile'
                                                 ? 'bg-secondary text-primary'
                                                 : 'text-zinc-300 hover:bg-zinc-800'
                                         )}
-                                        onClick={handleMenuToggle}
-                                        style={{ animationDelay: `${0.05 * (navItems.length + 1)}s` }}
+                                        title="Profil"
                                     >
-                                        <div className="flex items-center gap-2">
-                                            <svg
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                fill="none"
-                                                viewBox="0 0 24 24"
-                                                strokeWidth={1.5}
-                                                stroke="currentColor"
-                                                className="w-5 h-5"
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
-                                                />
-                                            </svg>
-                                            Profil
-                                        </div>
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            strokeWidth={1.5}
+                                            stroke="currentColor"
+                                            className="w-5 h-5"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
+                                            />
+                                        </svg>
                                     </Link>
-                                    <a
-                                        onClick={() => {
-                                            handleSignOut();
-                                            handleMenuToggle();
-                                        }}
-                                        className="px-3 py-2 rounded-md text-sm font-medium text-zinc-300 hover:bg-zinc-800 text-left mobile-menu-item cursor-pointer block"
-                                        style={{ animationDelay: `${0.05 * (navItems.length + 2)}s` }}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <svg
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                fill="none"
-                                                viewBox="0 0 24 24"
-                                                strokeWidth={1.5}
-                                                stroke="currentColor"
-                                                className="w-5 h-5"
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
-                                                />
-                                            </svg>
-                                            Abmelden
-                                        </div>
-                                    </a>
                                 </>
                             ) : (
                                 <Link
                                     href="/login"
-                                    className="px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-zinc-800 block mobile-menu-item"
-                                    onClick={handleMenuToggle}
-                                    style={{ animationDelay: `${0.05 * (navItems.length + 1)}s` }}
+                                    className="ml-2 px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-zinc-800"
                                 >
                                     Anmelden
                                 </Link>
                             )}
-                        </div>
-                    </nav>
-                )}
-            </div>
-        </header>
+                        </nav>
+                    </div>
+
+                    {/* Alte mobile Navigation (nur anzeigen, wenn isMobileView false ist) */}
+                    {!isMobileView && (mobileMenuOpen || isAnimating) && (
+                        <nav
+                            className={`mt-4 border-t border-zinc-700 pt-4 md:hidden mobile-menu-enter overflow-hidden transition-all duration-200 ${isAnimating ? 'opacity-0 max-h-0' : 'opacity-100 max-h-screen'}`}
+                        >
+                            <div className="flex flex-col space-y-2">
+                                {navItems.map((item, index) => (
+                                    <Link
+                                        key={item.href}
+                                        href={item.href}
+                                        className={clsx(
+                                            'px-3 py-2 rounded-md text-sm font-medium block mobile-menu-item',
+                                            pathname === item.href
+                                                ? 'bg-secondary text-primary'
+                                                : 'text-zinc-300 hover:bg-zinc-800'
+                                        )}
+                                        onClick={handleMenuToggle}
+                                        style={{ animationDelay: `${0.05 * (index + 1)}s` }}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            {item.icon}
+                                            {item.name}
+                                        </div>
+                                    </Link>
+                                ))}
+
+                                {user ? (
+                                    <>
+                                        <Link
+                                            href="/profile"
+                                            className={clsx(
+                                                'px-3 py-2 rounded-md text-sm font-medium block mobile-menu-item',
+                                                pathname === '/profile'
+                                                    ? 'bg-secondary text-primary'
+                                                    : 'text-zinc-300 hover:bg-zinc-800'
+                                            )}
+                                            onClick={handleMenuToggle}
+                                            style={{ animationDelay: `${0.05 * (navItems.length + 1)}s` }}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    strokeWidth={1.5}
+                                                    stroke="currentColor"
+                                                    className="w-5 h-5"
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
+                                                    />
+                                                </svg>
+                                                Profil
+                                            </div>
+                                        </Link>
+                                        <a
+                                            onClick={() => {
+                                                handleSignOut();
+                                                handleMenuToggle();
+                                            }}
+                                            className="px-3 py-2 rounded-md text-sm font-medium text-zinc-300 hover:bg-zinc-800 text-left mobile-menu-item cursor-pointer block"
+                                            style={{ animationDelay: `${0.05 * (navItems.length + 2)}s` }}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    strokeWidth={1.5}
+                                                    stroke="currentColor"
+                                                    className="w-5 h-5"
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
+                                                    />
+                                                </svg>
+                                                Abmelden
+                                            </div>
+                                        </a>
+                                    </>
+                                ) : (
+                                    <Link
+                                        href="/login"
+                                        className="px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-zinc-800 block mobile-menu-item"
+                                        onClick={handleMenuToggle}
+                                        style={{ animationDelay: `${0.05 * (navItems.length + 1)}s` }}
+                                    >
+                                        Anmelden
+                                    </Link>
+                                )}
+                            </div>
+                        </nav>
+                    )}
+                </div>
+            </header>
+
+            {/* Neue mobile Tab-Navigation (App-Stil) am unteren Bildschirmrand - ohne Profil-Tab */}
+            {isMobileView && (
+                <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-950 border-t border-zinc-800 mobile-tab-bar">
+                    <div className="grid grid-cols-4 h-16">
+                        {navItems.slice(0, 4).map((item) => (
+                            <AnimatedLink
+                                key={item.href}
+                                href={item.href}
+                                className={clsx(
+                                    'flex flex-col items-center justify-center px-1 transition-all',
+                                    pathname === item.href
+                                        ? 'text-primary'
+                                        : 'text-zinc-400 hover:text-zinc-200'
+                                )}
+                            >
+                                <div className="mb-1">
+                                    {item.icon}
+                                </div>
+                                <span className="text-xs">{item.name}</span>
+                            </AnimatedLink>
+                        ))}
+                    </div>
+                </nav>
+            )}
+
+            {/* Zusätzlicher Abstand am unteren Rand des Body für die Tab-Bar */}
+            {isMobileView && <div className="h-16 md:h-0"></div>}
+        </>
     );
 } 

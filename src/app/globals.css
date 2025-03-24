@@ -12,15 +12,45 @@
   --foreground: #ededed;
   --color-primary: #7bf1a8;
   --color-secondary: #0d2a18;
+
+  /* Übergangsvariablen */
+  --page-transition-duration: 200ms;
+  --page-transition-easing: ease-out;
+}
+
+/* Mobile Optimierungen für schnellere Seitenwechsel */
+html {
+  -webkit-overflow-scrolling: touch; /* Glätteres Scrollen auf iOS */
+}
+
+/* Mobile-spezifische Klasse - DIREKT ALLE ANIMATIONEN AUS */
+html.mobile * {
+  animation: none !important;
+  transition: none !important;
+  -webkit-animation: none !important;
+  -webkit-transition: none !important;
+}
+
+/* Klasse zum temporären Deaktivieren von Animationen (für Desktop) */
+html.disable-animations * {
+  transition: none !important;
+  animation: none !important;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell,
+    "Open Sans", "Helvetica Neue", sans-serif;
   -webkit-text-size-adjust: 100%;
   -webkit-font-smoothing: antialiased;
+  -webkit-overflow-scrolling: touch;
+  touch-action: manipulation;
+  overscroll-behavior-y: contain;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Mobile optimization */
@@ -29,6 +59,99 @@ button,
 select,
 textarea {
   font-size: 16px; /* Prevents zoom on focus in iOS */
+}
+
+/* VERBESSERTE MOBILE OPTIMIERUNGEN */
+@media (max-width: 767px) {
+  /* Mobile-First: Alle Übergänge komplett deaktivieren */
+  * {
+    animation: none !important;
+    transition: none !important;
+    animation-delay: 0ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  /* Sofort sichtbare Inhalte */
+  .page-transition-wrapper,
+  .page-content,
+  .page-content > * {
+    opacity: 1 !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Deaktiviere contentVisibility für Mobile, was zu Verzögerungen führen kann */
+  main,
+  section,
+  div {
+    content-visibility: visible;
+    contain: none;
+  }
+
+  /* Optimiere Renderperformance für Mobile */
+  body {
+    -webkit-font-smoothing: auto;
+  }
+}
+
+/* Verbesserte Seitenübergangsanimationen - NUR FÜR DESKTOP */
+.page-transition-wrapper {
+  opacity: 1;
+  transform: translateZ(0);
+  will-change: opacity;
+
+  @media (min-width: 768px) {
+    transition: opacity 0.2s ease;
+  }
+}
+
+.page-transition-wrapper.transitioning {
+  @media (min-width: 768px) {
+    opacity: 0.6;
+  }
+}
+
+.page-content {
+  position: relative;
+
+  @media (min-width: 768px) {
+    min-height: calc(100vh - 160px);
+    transition: opacity var(--page-transition-duration)
+      var(--page-transition-easing);
+    will-change: opacity;
+  }
+}
+
+/* Stelle sicher, dass der Inhalt nicht springt - NUR DESKTOP */
+@media (min-width: 768px) {
+  .page-content > * {
+    animation: contentFadeIn 0.1s ease-out forwards;
+  }
+}
+
+@keyframes contentFadeIn {
+  from {
+    opacity: 0.9;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Spezifische Mobile-Optimierungen */
+@supports (-webkit-touch-callout: none) {
+  /* Keine Animationen in Safari auf iOS */
+  html.mobile * {
+    -webkit-animation: none !important;
+    -webkit-transition: none !important;
+  }
+}
+
+/* Verhindern von Flimmern durch vordefinierte Dimensionen für Bilder und Medien */
+img,
+video,
+iframe {
+  min-height: 1px;
 }
 
 /* Mobile menu animations */
@@ -61,6 +184,15 @@ textarea {
     transform: scale(1);
     opacity: 1;
   }
+}
+
+/* Optimierung für Container-Elemente */
+main,
+section,
+div {
+  /* Verhindert Layout-Shifts */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 500px;
 }
 
 .mobile-menu-enter {
@@ -110,4 +242,128 @@ textarea {
     min-height: 44px;
     min-width: 44px;
   }
+}
+
+/* Mobile Tab Bar Animation und Styling */
+.mobile-tab-bar {
+  animation: slideUp 0.3s ease forwards;
+  box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.2);
+  z-index: 50;
+}
+
+@keyframes slideUp {
+  0% {
+    transform: translateY(100%);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* Aktiver Tab-Indikator */
+.mobile-tab-bar a.text-primary::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 3px;
+  background-color: var(--color-primary);
+  border-radius: 0 0 3px 3px;
+}
+
+/* Aktivieren der hardwaregestützte Beschleunigung für Animationen */
+.mobile-tab-bar,
+.mobile-menu-enter,
+.mobile-menu-item {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Aktive State Ripple Effekt */
+.mobile-tab-bar a {
+  position: relative;
+  overflow: hidden;
+}
+
+.mobile-tab-bar a::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  background-color: rgba(123, 241, 168, 0.3);
+  opacity: 0;
+  border-radius: 100%;
+  transform: scale(1) translate(-50%, -50%);
+  transform-origin: 50% 50%;
+}
+
+.mobile-tab-bar a:active::after {
+  opacity: 1;
+  animation: ripple 0.4s ease-out;
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(1) translate(-50%, -50%);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(40) translate(-50%, -50%);
+    opacity: 0;
+  }
+}
+
+/* Seitenwechsel-Animation */
+.page-transition {
+  animation: fadeInOut 0.3s ease-in-out;
+  pointer-events: none;
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Safari-spezifische Verbesserungen, um Übergangsanimationen zu glätten */
+@supports (-webkit-touch-callout: none) {
+  .mobile-tab-bar {
+    -webkit-backdrop-filter: blur(0px);
+    backdrop-filter: blur(0px);
+  }
+
+  /* Verbesserte Touch-Oberfläche für mobile Safari */
+  .mobile-tab-bar a {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Stil für aktuelle Seite in der Tab-Bar */
+.mobile-tab-bar a.text-primary {
+  position: relative;
+  font-weight: 500;
+}
+
+/* Aktiver Tab-Indikator (verbessert) */
+.mobile-tab-bar a.text-primary::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 3px;
+  background-color: var(--color-primary);
+  border-radius: 0 0 3px 3px;
 }
