@@ -114,7 +114,7 @@ export default function RootLayout({ children }) {
             <div className="relative">
               <Header />
             </div>
-            <main className="flex-1 container mx-auto px-4 py-4 sm:py-8">
+            <main className="flex-1 container mx-auto px-4 py-4 sm:py-8 mb-16 md:mb-0">
               <div className="page-transition-wrapper">
                 <div className="page-content">
                   {children}
