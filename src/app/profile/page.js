@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { getProfile, updateProfile, updateAccessCode, signOut } from '@/lib/supabase';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
@@ -9,63 +9,32 @@ import Input from '@/components/ui/Input';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 
-export default function ProfilePage() {
-    const { user, loading: authLoading } = useAuth();
-    const router = useRouter();
-    const [profile, setProfile] = useState(null);
+// Komponente für den Ladeindikator
+function LoadingIndicator({ message }) {
+    return (
+        <div className="flex justify-center items-center py-12">
+            <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary mb-4"></div>
+                <p className="text-zinc-500">{message}</p>
+            </div>
+        </div>
+    );
+}
+
+// Hauptkomponente für den Profilinhalt
+function ProfileContent({ user, profile, onSave, onAccessCodeChange, onSignOut, isSaving, isChangingAccessCode }) {
     const [formData, setFormData] = useState({
-        name: '',
-        email: '',
+        name: profile.player?.name || user.user_metadata?.name || '',
+        email: profile.player?.email || user.email || '',
     });
+
     const [accessCodeData, setAccessCodeData] = useState({
         currentAccessCode: '',
         newAccessCode: '',
         confirmAccessCode: '',
     });
-    const [profileLoading, setProfileLoading] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-    const [isChangingAccessCode, setIsChangingAccessCode] = useState(false);
 
-    // Lade das Profil des Benutzers
-    useEffect(() => {
-        const fetchProfile = async () => {
-            if (!user) return;
-
-            try {
-                setProfileLoading(true);
-                const { data, error } = await getProfile(user.id);
-                if (error) {
-                    throw error;
-                }
-
-                setProfile(data);
-                setFormData({
-                    name: data.player?.name || user.user_metadata?.name || '',
-                    email: data.player?.email || user.email || '',
-                });
-            } catch (error) {
-                toast.error('Fehler beim Laden des Profils');
-                console.error("Profilfehler:", error);
-            } finally {
-                setProfileLoading(false);
-            }
-        };
-
-        fetchProfile();
-    }, [user]);
-
-    // Leite nicht angemeldete Benutzer zur Login-Seite weiter
-    useEffect(() => {
-        if (!authLoading && !user) {
-            router.push('/login');
-            // Zeige die Fehlermeldung nur, wenn die Seite direkt aufgerufen wurde
-            if (!document.referrer.includes('/login')) {
-                toast.error('Bitte melde dich an, um dein Profil zu bearbeiten');
-            }
-        }
-    }, [user, authLoading, router]);
-
-    // Aktualisiere Profilformular
+    // Handler für Formulareingaben
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({
@@ -74,7 +43,6 @@ export default function ProfilePage() {
         }));
     };
 
-    // Aktualisiere Zugangscode-Formular
     const handleAccessCodeChange = (e) => {
         const { name, value } = e.target;
         setAccessCodeData(prev => ({
@@ -83,117 +51,21 @@ export default function ProfilePage() {
         }));
     };
 
-    // Speichere Profiländerungen
+    // Handler für Formular-Submits
     const handleSaveProfile = async (e) => {
         e.preventDefault();
-
-        if (!user) {
-            toast.error('Du musst angemeldet sein, um dein Profil zu bearbeiten');
-            return;
-        }
-
-        setIsSaving(true);
-
-        try {
-            const updates = {
-                name: formData.name,
-            };
-
-            const { error } = await updateProfile(user.id, updates);
-            if (error) {
-                throw error;
-            }
-
-            toast.success('Profil erfolgreich aktualisiert');
-
-            // Aktualisiere das Profil in der Anzeige
-            setProfile(prev => ({
-                ...prev,
-                ...updates
-            }));
-        } catch (error) {
-            toast.error('Fehler beim Aktualisieren des Profils');
-            console.error(error);
-        } finally {
-            setIsSaving(false);
-        }
+        onSave(formData);
     };
 
-    // Ändere Zugangscode
     const handleChangeAccessCode = async (e) => {
         e.preventDefault();
-
-        if (!user) {
-            toast.error('Du musst angemeldet sein, um deinen Zugangscode zu ändern');
-            return;
-        }
-
-        const { currentAccessCode, newAccessCode, confirmAccessCode } = accessCodeData;
-
-        if (!currentAccessCode || !newAccessCode || !confirmAccessCode) {
-            toast.error('Bitte fülle alle Felder aus');
-            return;
-        }
-
-        if (newAccessCode !== confirmAccessCode) {
-            toast.error('Die neuen Zugangscodes stimmen nicht überein');
-            return;
-        }
-
-        setIsChangingAccessCode(true);
-
-        try {
-            // Hier würde normalerweise eine Verifizierung des aktuellen Zugangscodes erfolgen,
-            // aber für die Einfachheit überspringen wir das
-
-            const { error } = await updateAccessCode(user.id, newAccessCode);
-
-            if (error) {
-                throw error;
-            }
-
-            toast.success('Zugangscode erfolgreich geändert');
-
-            // Formular zurücksetzen
-            setAccessCodeData({
-                currentAccessCode: '',
-                newAccessCode: '',
-                confirmAccessCode: '',
-            });
-        } catch (error) {
-            toast.error('Fehler beim Ändern des Zugangscodes');
-            console.error(error);
-        } finally {
-            setIsChangingAccessCode(false);
-        }
+        onAccessCodeChange(accessCodeData);
+        setAccessCodeData({
+            currentAccessCode: '',
+            newAccessCode: '',
+            confirmAccessCode: '',
+        });
     };
-
-    // Benutzer abmelden
-    const handleSignOut = async () => {
-        try {
-            const { error } = await signOut();
-            if (error) {
-                toast.error('Fehler beim Abmelden');
-            } else {
-                toast.success('Erfolgreich abgemeldet');
-                router.push('/');
-            }
-        } catch (error) {
-            toast.error('Fehler beim Abmelden');
-            console.error(error);
-        }
-    };
-
-    // Wenn Benutzer nicht angemeldet ist oder Profil geladen wird
-    if (profileLoading || !user || !profile) {
-        return (
-            <div className="flex justify-center items-center py-12">
-                <div className="text-center">
-                    <p className="text-zinc-500">Lade Profil...</p>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="space-y-8">
@@ -328,7 +200,7 @@ export default function ProfilePage() {
                 <CardContent>
                     <div className="space-y-4">
                         <Button
-                            onClick={handleSignOut}
+                            onClick={onSignOut}
                             variant="primary"
                         >
                             <svg
@@ -351,5 +223,172 @@ export default function ProfilePage() {
                 </CardContent>
             </Card>
         </div>
+    );
+}
+
+// Hauptkomponente
+export default function ProfilePage() {
+    const { user, loading: authLoading } = useAuth();
+    const router = useRouter();
+    const [profile, setProfile] = useState(null);
+    const [profileLoading, setProfileLoading] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isChangingAccessCode, setIsChangingAccessCode] = useState(false);
+
+    // Lade das Profil des Benutzers
+    useEffect(() => {
+        let isMounted = true;
+
+        const fetchProfile = async () => {
+            if (!user) return;
+
+            try {
+                setProfileLoading(true);
+                const { data, error, stale } = await getProfile(user.id);
+
+                if (error) throw error;
+
+                if (isMounted) {
+                    setProfile(data);
+                    if (stale) {
+                        // Wenn die Daten veraltet sind, zeige einen Hinweis
+                        toast.error('Verbindungsprobleme - einige Daten könnten veraltet sein');
+                    }
+                }
+            } catch (error) {
+                if (isMounted) {
+                    toast.error('Fehler beim Laden des Profils');
+                    console.error("Profilfehler:", error);
+                }
+            } finally {
+                if (isMounted) {
+                    setProfileLoading(false);
+                }
+            }
+        };
+
+        fetchProfile();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [user]);
+
+    // Leite nicht angemeldete Benutzer zur Login-Seite weiter
+    useEffect(() => {
+        if (!authLoading && !user) {
+            router.push('/login');
+            if (!document.referrer.includes('/login')) {
+                toast.error('Bitte melde dich an, um dein Profil zu bearbeiten');
+            }
+        }
+    }, [user, authLoading, router]);
+
+    // Handler für Profilaktualisierung
+    const handleSaveProfile = async (formData) => {
+        if (!user) {
+            toast.error('Du musst angemeldet sein, um dein Profil zu bearbeiten');
+            return;
+        }
+
+        setIsSaving(true);
+
+        try {
+            const updates = {
+                name: formData.name,
+            };
+
+            const { error } = await updateProfile(user.id, updates);
+            if (error) throw error;
+
+            toast.success('Profil erfolgreich aktualisiert');
+            setProfile(prev => ({
+                ...prev,
+                player: {
+                    ...prev.player,
+                    ...updates
+                }
+            }));
+        } catch (error) {
+            toast.error('Fehler beim Aktualisieren des Profils');
+            console.error(error);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // Handler für Zugangscode-Änderung
+    const handleChangeAccessCode = async (accessCodeData) => {
+        if (!user) {
+            toast.error('Du musst angemeldet sein, um deinen Zugangscode zu ändern');
+            return;
+        }
+
+        const { currentAccessCode, newAccessCode, confirmAccessCode } = accessCodeData;
+
+        if (!currentAccessCode || !newAccessCode || !confirmAccessCode) {
+            toast.error('Bitte fülle alle Felder aus');
+            return;
+        }
+
+        if (newAccessCode !== confirmAccessCode) {
+            toast.error('Die neuen Zugangscodes stimmen nicht überein');
+            return;
+        }
+
+        setIsChangingAccessCode(true);
+
+        try {
+            const { error } = await updateAccessCode(user.id, newAccessCode);
+            if (error) throw error;
+            toast.success('Zugangscode erfolgreich geändert');
+        } catch (error) {
+            toast.error('Fehler beim Ändern des Zugangscodes');
+            console.error(error);
+        } finally {
+            setIsChangingAccessCode(false);
+        }
+    };
+
+    // Handler für Abmeldung
+    const handleSignOut = async () => {
+        try {
+            const { error } = await signOut();
+            if (error) {
+                toast.error('Fehler beim Abmelden');
+            } else {
+                toast.success('Erfolgreich abgemeldet');
+                router.push('/');
+            }
+        } catch (error) {
+            toast.error('Fehler beim Abmelden');
+            console.error(error);
+        }
+    };
+
+    if (authLoading) {
+        return <LoadingIndicator message="Authentifizierung lädt..." />;
+    }
+
+    if (!user) {
+        return null;
+    }
+
+    if (profileLoading || !profile) {
+        return <LoadingIndicator message="Lade Profil..." />;
+    }
+
+    return (
+        <Suspense fallback={<LoadingIndicator message="Lade Profil..." />}>
+            <ProfileContent
+                user={user}
+                profile={profile}
+                onSave={handleSaveProfile}
+                onAccessCodeChange={handleChangeAccessCode}
+                onSignOut={handleSignOut}
+                isSaving={isSaving}
+                isChangingAccessCode={isChangingAccessCode}
+            />
+        </Suspense>
     );
 } 

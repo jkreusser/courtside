@@ -436,25 +436,41 @@ export const getCurrentUser = async () => {
     return user;
 };
 
+// Cache für Profile-Daten hinzufügen
+const profileCache = {
+    data: {},
+    timestamp: {},
+    version: 0
+};
+
 // Funktion zum Aktualisieren des eigenen Profils
 export async function getProfile(userId) {
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 1000;
+    const CACHE_DURATION = 30 * 1000; // 30 Sekunden Cache
+    const MAX_RETRIES = 2; // Weniger Wiederholungsversuche
+    const RETRY_DELAY = 500; // Kürzere Verzögerung
+
+    // Prüfe Cache
+    if (profileCache.data[userId] &&
+        Date.now() - profileCache.timestamp[userId] < CACHE_DURATION) {
+        return { data: profileCache.data[userId], error: null };
+    }
 
     const fetchWithRetry = async (attempt = 0) => {
         try {
-            // Separate Abfragen für Profile und Player
+            // Optimierte Abfrage mit weniger Feldern
             const [profileResult, playerResult] = await Promise.all([
                 supabase
                     .from('profiles')
-                    .select('*')
-                    .eq('id', userId)
-                    .single(),
-                supabase
-                    .from('players')
-                    .select('*')
+                    .select('id, role')
                     .eq('id', userId)
                     .single()
+                    .timeout(3000), // Timeout nach 3 Sekunden
+                supabase
+                    .from('players')
+                    .select('id, name, email')
+                    .eq('id', userId)
+                    .single()
+                    .timeout(3000)
             ]);
 
             // Überprüfe auf Fehler
@@ -466,6 +482,11 @@ export async function getProfile(userId) {
                 player: playerResult.error ? null : playerResult.data
             };
 
+            // Aktualisiere Cache
+            profileCache.data[userId] = combinedData;
+            profileCache.timestamp[userId] = Date.now();
+            profileCache.version++;
+
             return { data: combinedData, error: null };
         } catch (error) {
             console.error(`Fehler beim Abrufen des Profils (Versuch ${attempt + 1}/${MAX_RETRIES}):`, error);
@@ -473,6 +494,16 @@ export async function getProfile(userId) {
             if (attempt < MAX_RETRIES - 1) {
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt)));
                 return fetchWithRetry(attempt + 1);
+            }
+
+            // Bei Fehler versuche veraltete Cache-Daten zu verwenden
+            if (profileCache.data[userId]) {
+                console.log('Verwende veraltete Cache-Daten nach Fehler');
+                return {
+                    data: profileCache.data[userId],
+                    error: null,
+                    stale: true
+                };
             }
 
             return { data: null, error };
@@ -662,6 +693,11 @@ export const invalidateCache = (key = null) => {
         queryCache.dailyRankings.data = {};
         queryCache.dailyRankings.timestamp = {};
         queryCache.dailyRankings.version++;
+    }
+    if (key === 'profile' || key === null) {
+        profileCache.data = {};
+        profileCache.timestamp = {};
+        profileCache.version++;
     }
 };
 
