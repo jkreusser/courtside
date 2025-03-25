@@ -397,31 +397,32 @@ export default function Header() {
 
             {/* Neue mobile Tab-Navigation (App-Stil) am unteren Bildschirmrand - ohne Profil-Tab */}
             {isMobileView && (
-                <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-950 border-t border-zinc-800 mobile-tab-bar">
-                    <div className="grid grid-cols-4 h-16">
-                        {navItems.slice(0, 4).map((item) => (
-                            <AnimatedLink
-                                key={item.href}
-                                href={item.href}
-                                className={clsx(
-                                    'flex flex-col items-center justify-center px-1 transition-all',
-                                    pathname === item.href
-                                        ? 'text-primary'
-                                        : 'text-zinc-400 hover:text-zinc-200'
-                                )}
-                            >
-                                <div className="mb-1">
-                                    {item.icon}
-                                </div>
-                                <span className="text-xs">{item.name}</span>
-                            </AnimatedLink>
-                        ))}
-                    </div>
-                </nav>
+                <>
+                    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-950 border-t border-zinc-800 mobile-tab-bar z-50">
+                        <div className="grid grid-cols-4 h-16">
+                            {navItems.slice(0, 4).map((item) => (
+                                <AnimatedLink
+                                    key={item.href}
+                                    href={item.href}
+                                    className={clsx(
+                                        'flex flex-col items-center justify-center px-1 transition-all',
+                                        pathname === item.href
+                                            ? 'text-primary'
+                                            : 'text-zinc-400 hover:text-zinc-200'
+                                    )}
+                                >
+                                    <div className="mb-1">
+                                        {item.icon}
+                                    </div>
+                                    <span className="text-xs">{item.name}</span>
+                                </AnimatedLink>
+                            ))}
+                        </div>
+                    </nav>
+                    {/* Zusätzlicher Abstand am unteren Rand des Body für die Tab-Bar */}
+                    <div className="h-8 md:h-0" />
+                </>
             )}
-
-            {/* Zusätzlicher Abstand am unteren Rand des Body für die Tab-Bar */}
-            {isMobileView && <div className="h-16 md:h-0"></div>}
         </>
     );
 } 

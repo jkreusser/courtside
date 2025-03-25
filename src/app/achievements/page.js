@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import { supabase } from '@/lib/supabase';
@@ -27,6 +27,7 @@ export default function AchievementsPage() {
     const [userAchievements, setUserAchievements] = useState([]);
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState({ total: 0, achieved: 0 });
+    const [error, setError] = useState(null);
 
     // Router-Schutz: Leite zur Login-Seite weiter, wenn der Benutzer nicht angemeldet ist
     useEffect(() => {
@@ -35,8 +36,8 @@ export default function AchievementsPage() {
         }
     }, [user, authLoading, router]);
 
-    // Achievement-Definitionen
-    const allAchievements = [
+    // Achievement-Definitionen als Konstante außerhalb der Komponente
+    const allAchievements = useMemo(() => [
         {
             id: 'first_match',
             title: 'Erstes Match',
@@ -117,27 +118,33 @@ export default function AchievementsPage() {
             backgroundColor: 'bg-secondary',
             textColor: 'text-primary'
         }
-    ];
+    ], []);
 
     // Lade Achievements für den aktuellen Benutzer oder zeige alle Achievements an
     useEffect(() => {
+        let isMounted = true;
+        let retryTimeout;
+
         const fetchAchievements = async () => {
             if (!user) return;
 
             try {
                 setLoading(true);
+                setError(null);
 
                 if (user) {
-                    // Wenn der Benutzer angemeldet ist, hole seine erreichten Achievements
+                    // Optimierte Abfrage mit spezifischer Feldauswahl
                     const { data, error } = await supabase
                         .from('player_achievements')
                         .select('achievement_id, achieved_at')
-                        .eq('player_id', user.id);
+                        .eq('player_id', user.id)
+                        .throwOnError();
 
                     if (error) {
-                        console.error('Fehler beim Laden der Benutzer-Achievements:', error);
-                        toast.error('Fehler beim Laden der Achievements');
-                    } else {
+                        throw error;
+                    }
+
+                    if (isMounted) {
                         setUserAchievements(data || []);
 
                         // Kombiniere alle Achievements mit Benutzerstatus
@@ -166,27 +173,103 @@ export default function AchievementsPage() {
                         achieved: false
                     }));
 
-                    setAchievements(achievementsWithoutStatus);
-                    setStats({
-                        total: allAchievements.length,
-                        achieved: 0
-                    });
+                    if (isMounted) {
+                        setAchievements(achievementsWithoutStatus);
+                        setStats({
+                            total: allAchievements.length,
+                            achieved: 0
+                        });
+                    }
                 }
             } catch (error) {
-                console.error('Unerwarteter Fehler:', error);
-                toast.error('Fehler beim Laden der Achievements');
+                console.error('Fehler beim Laden der Achievements:', error);
+                if (isMounted) {
+                    setError('Fehler beim Laden der Achievements');
+                    toast.error('Fehler beim Laden der Achievements');
+
+                    // Wiederholungsversuch mit exponentieller Verzögerung
+                    let retryCount = 0;
+                    const maxRetries = 3;
+                    const retryWithBackoff = async () => {
+                        if (retryCount >= maxRetries || !isMounted) return;
+
+                        retryCount++;
+                        const delay = 1000 * Math.pow(2, retryCount - 1);
+                        console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
+
+                        await new Promise(resolve => setTimeout(resolve, delay));
+
+                        try {
+                            const { data: retryData, error: retryError } = await supabase
+                                .from('player_achievements')
+                                .select('achievement_id, achieved_at')
+                                .eq('player_id', user.id)
+                                .throwOnError();
+
+                            if (retryError) {
+                                throw retryError;
+                            }
+
+                            if (isMounted) {
+                                setUserAchievements(retryData || []);
+                                const achievementsWithStatus = allAchievements.map(achievement => {
+                                    const userAchievement = retryData?.find(ua => ua.achievement_id === achievement.id);
+                                    return {
+                                        ...achievement,
+                                        achieved: !!userAchievement,
+                                        achievedAt: userAchievement?.achieved_at
+                                    };
+                                });
+
+                                setAchievements(achievementsWithStatus);
+                                setStats({
+                                    total: allAchievements.length,
+                                    achieved: achievementsWithStatus.filter(a => a.achieved).length
+                                });
+                                return true;
+                            }
+                        } catch (retryError) {
+                            console.error('Fehler beim Wiederholungsversuch:', retryError);
+                        }
+
+                        if (retryCount < maxRetries && isMounted) {
+                            return retryWithBackoff();
+                        }
+
+                        return false;
+                    };
+
+                    const success = await retryWithBackoff();
+                    if (!success && isMounted) {
+                        retryTimeout = setTimeout(() => {
+                            router.refresh();
+                        }, 5000);
+                    }
+                }
             } finally {
-                setLoading(false);
+                if (isMounted) {
+                    setLoading(false);
+                }
             }
         };
 
         if (user && !authLoading) {
             fetchAchievements();
         }
-    }, [user, authLoading]);
+
+        return () => {
+            isMounted = false;
+            if (retryTimeout) {
+                clearTimeout(retryTimeout);
+            }
+        };
+    }, [user, authLoading, router, allAchievements]);
 
     // Fortschrittberechnung
-    const progressPercentage = stats.total > 0 ? (stats.achieved / stats.total) * 100 : 0;
+    const progressPercentage = useMemo(() =>
+        stats.total > 0 ? (stats.achieved / stats.total) * 100 : 0,
+        [stats.total, stats.achieved]
+    );
 
     if (authLoading) {
         return <div className="text-center py-8">Authentifizierung lädt...</div>;
@@ -222,6 +305,8 @@ export default function AchievementsPage() {
 
             {loading ? (
                 <div className="text-center py-12">Lade Achievements...</div>
+            ) : error ? (
+                <div className="text-center py-12 text-red-600">{error}</div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {achievements.map((achievement) => (
@@ -249,7 +334,7 @@ export default function AchievementsPage() {
                                         <LockClosedIcon className="h-5 w-5 text-zinc-500" />
                                     )}
                                 </div>
-                                <CardTitle className={`text-lg ${achievement.achieved ? 'text-white' : 'text-zinc-400'}`}>
+                                <CardTitle className={achievement.achieved ? 'text-primary' : 'text-zinc-400'}>
                                     {achievement.title || achievement.name}
                                 </CardTitle>
                                 <CardDescription className={achievement.achieved ? 'text-zinc-300' : 'text-zinc-500'}>
@@ -283,12 +368,10 @@ export default function AchievementsPage() {
                     <CardTitle>Wie funktionieren Achievements?</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <p className="mb-4">
-                        Achievements werden automatisch freigeschaltet, wenn du bestimmte Ziele erreichst. Sie zeigen deinen Fortschritt und deine Erfolge im Spiel an.
+                    <p className="text-zinc-400">
+                        Achievements werden automatisch freigeschaltet, wenn du bestimmte Ziele erreichst.
+                        Einige Achievements basieren auf deiner Spielanzahl, andere auf Siegesserien oder besonderen Leistungen.
                     </p>
-                    <div className="text-center text-gray-300 mt-8">
-                        Spiele regelmäßig, gewinne Spiele und verbessere deine Fähigkeiten, um alle Achievements freizuschalten!
-                    </div>
                 </CardContent>
             </Card>
         </div>

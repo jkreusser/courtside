@@ -7,6 +7,8 @@ import { Select, SelectOption } from '@/components/ui/Select';
 import toast from 'react-hot-toast';
 import { format, subDays } from 'date-fns';
 import { de } from 'date-fns/locale';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 function RankingsContent() {
     const [allTimeRankings, setAllTimeRankings] = useState([]);
@@ -14,22 +16,17 @@ function RankingsContent() {
     const [loading, setLoading] = useState(true);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [availableDates, setAvailableDates] = useState([]);
+    const [playerNames, setPlayerNames] = useState({});
+    const [rankings, setRankings] = useState([]);
+    const router = useRouter();
 
-    // Lade Ranglisten
     useEffect(() => {
+        let isMounted = true;
+        let retryTimeout;
+
         const fetchRankings = async () => {
             try {
                 setLoading(true);
-
-                // Lade die Gesamtrangliste mit optimierter Funktion
-                const { data: allTimeData, error: allTimeError } = await getRankings();
-
-                if (allTimeError) {
-                    console.error('Fehler beim Laden der All-Time-Rangliste:', allTimeError);
-                    toast.error('Fehler beim Laden der All-Time-Rangliste');
-                } else {
-                    setAllTimeRankings(allTimeData || []);
-                }
 
                 // Generiere Daten für die letzten 30 Tage für die Auswahl
                 const dates = [];
@@ -37,64 +34,198 @@ function RankingsContent() {
                     const date = subDays(new Date(), i);
                     dates.push(format(date, 'yyyy-MM-dd'));
                 }
-                setAvailableDates(dates);
+                if (isMounted) {
+                    setAvailableDates(dates);
+                }
 
-                // Lade tägliches Ranking für den ausgewählten Tag
-                await fetchDailyRanking(selectedDate);
+                // Optimierte Rankings-Abfrage mit spezifischer Feldauswahl
+                const { data: rankingsData, error: rankingsError } = await getRankings();
+
+                if (rankingsError) {
+                    throw rankingsError;
+                }
+
+                // Optimierte Tagesrankings-Abfrage mit spezifischer Feldauswahl
+                const { data: dailyRankingsData, error: dailyRankingsError } = await getDailyRankings(selectedDate);
+
+                if (dailyRankingsError) {
+                    throw dailyRankingsError;
+                }
+
+                if (isMounted) {
+                    // Sammle einzigartige Spieler-IDs
+                    const playerIds = new Set();
+                    rankingsData.forEach(ranking => {
+                        if (ranking.player_id) playerIds.add(ranking.player_id);
+                    });
+                    dailyRankingsData.forEach(ranking => {
+                        if (ranking.player_id) playerIds.add(ranking.player_id);
+                    });
+
+                    // Lade Spielernamen in einem Batch
+                    if (playerIds.size > 0) {
+                        const { data: playersData, error: playersError } = await supabase
+                            .from('players')
+                            .select('id, name')
+                            .in('id', Array.from(playerIds))
+                            .throwOnError();
+
+                        if (!playersError && playersData) {
+                            const namesMap = {};
+                            playersData.forEach(player => {
+                                namesMap[player.id] = player.name;
+                            });
+                            if (isMounted) {
+                                setPlayerNames(namesMap);
+
+                                // Verarbeite die Rankings-Daten erst nachdem die Spielernamen geladen wurden
+                                const processedRankings = rankingsData.map((ranking, index) => ({
+                                    ...ranking,
+                                    rank: index + 1,
+                                    player_name: namesMap[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`
+                                }));
+
+                                // Verarbeite die Tagesrankings-Daten
+                                const processedDailyRankings = dailyRankingsData.map(ranking => ({
+                                    ...ranking,
+                                    player_name: namesMap[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`
+                                }));
+
+                                setRankings(processedRankings);
+                                setDailyRankings(processedDailyRankings);
+                            }
+                        }
+                    } else {
+                        // Wenn keine Spieler-IDs vorhanden sind, verarbeite die Daten trotzdem
+                        const processedRankings = rankingsData.map((ranking, index) => ({
+                            ...ranking,
+                            rank: index + 1,
+                            player_name: `Spieler ${ranking.player_id.substring(0, 8)}...`
+                        }));
+
+                        const processedDailyRankings = dailyRankingsData.map(ranking => ({
+                            ...ranking,
+                            player_name: `Spieler ${ranking.player_id.substring(0, 8)}...`
+                        }));
+
+                        if (isMounted) {
+                            setRankings(processedRankings);
+                            setDailyRankings(processedDailyRankings);
+                        }
+                    }
+                }
             } catch (error) {
-                console.error('Ein Fehler ist aufgetreten:', error);
-                toast.error('Ein Fehler ist aufgetreten beim Laden der Ranglisten');
+                console.error('Fehler beim Laden der Rankings:', error);
+                // Toast nur anzeigen, wenn es sich nicht um einen Auth-Fehler handelt
+                if (!error.message?.includes('auth')) {
+                    toast.error('Fehler beim Laden der Rankings');
+                }
+
+                // Wiederholungsversuch mit exponentieller Verzögerung
+                let retryCount = 0;
+                const maxRetries = 5;
+                const retryWithBackoff = async () => {
+                    if (retryCount >= maxRetries || !isMounted) return;
+
+                    retryCount++;
+                    const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
+                    console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
+
+                    await new Promise(resolve => setTimeout(resolve, delay));
+
+                    try {
+                        // Wiederhole die Rankings-Abfrage
+                        const { data: retryRankingsData, error: retryRankingsError } = await getRankings();
+
+                        if (retryRankingsError) {
+                            throw retryRankingsError;
+                        }
+
+                        // Wiederhole die Tagesrankings-Abfrage
+                        const { data: retryDailyRankingsData, error: retryDailyRankingsError } = await getDailyRankings(selectedDate);
+
+                        if (retryDailyRankingsError) {
+                            throw retryDailyRankingsError;
+                        }
+
+                        if (isMounted) {
+                            // Sammle einzigartige Spieler-IDs
+                            const playerIds = new Set();
+                            retryRankingsData.forEach(ranking => {
+                                if (ranking.player_id) playerIds.add(ranking.player_id);
+                            });
+                            retryDailyRankingsData.forEach(ranking => {
+                                if (ranking.player_id) playerIds.add(ranking.player_id);
+                            });
+
+                            // Lade Spielernamen in einem Batch
+                            if (playerIds.size > 0) {
+                                const { data: retryPlayersData, error: retryPlayersError } = await supabase
+                                    .from('players')
+                                    .select('id, name')
+                                    .in('id', Array.from(playerIds))
+                                    .throwOnError();
+
+                                if (!retryPlayersError && retryPlayersData) {
+                                    const namesMap = {};
+                                    retryPlayersData.forEach(player => {
+                                        namesMap[player.id] = player.name;
+                                    });
+                                    setPlayerNames(namesMap);
+                                }
+                            }
+
+                            // Verarbeite die Rankings-Daten
+                            const processedRankings = retryRankingsData.map((ranking, index) => ({
+                                ...ranking,
+                                rank: index + 1,
+                                player_name: playerNames[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`
+                            }));
+
+                            // Verarbeite die Tagesrankings-Daten
+                            const processedDailyRankings = retryDailyRankingsData.map(ranking => ({
+                                ...ranking,
+                                player_name: playerNames[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`
+                            }));
+
+                            setRankings(processedRankings);
+                            setDailyRankings(processedDailyRankings);
+                            return true;
+                        }
+                    } catch (retryError) {
+                        console.error('Fehler beim Wiederholungsversuch:', retryError);
+                    }
+
+                    if (retryCount < maxRetries && isMounted) {
+                        return retryWithBackoff();
+                    }
+
+                    return false;
+                };
+
+                const success = await retryWithBackoff();
+                if (!success && isMounted) {
+                    // Setze einen Timeout für den nächsten Versuch
+                    retryTimeout = setTimeout(() => {
+                        router.refresh();
+                    }, 5000);
+                }
             } finally {
-                setLoading(false);
+                if (isMounted) {
+                    setLoading(false);
+                }
             }
         };
 
         fetchRankings();
-    }, [selectedDate]); // Wichtig: selectedDate als Abhängigkeit hinzufügen
 
-    // Lade tägliches Ranking für einen bestimmten Tag mit Fehlerwiederholung
-    const fetchDailyRanking = async (date) => {
-        let retryCount = 0;
-        const maxRetries = 3;
-        const retryDelay = 1000; // 1 Sekunde Verzögerung zwischen Versuchen
-
-        const attemptFetch = async () => {
-            try {
-                setLoading(true);
-                const { data, error } = await getDailyRankings(date);
-
-                if (error) {
-                    if (retryCount < maxRetries) {
-                        console.warn(`Fehler beim Laden des täglichen Rankings. Wiederhole (${retryCount + 1}/${maxRetries})...`);
-                        retryCount++;
-                        await new Promise(resolve => setTimeout(resolve, retryDelay * retryCount));
-                        return attemptFetch();
-                    }
-
-                    console.error('Fehler beim Laden des täglichen Rankings:', error);
-                    toast.error('Fehler beim Laden des täglichen Rankings');
-                    setDailyRankings([]);
-                } else {
-                    setDailyRankings(data || []);
-                }
-            } catch (error) {
-                if (retryCount < maxRetries) {
-                    console.warn(`Unerwarteter Fehler. Wiederhole (${retryCount + 1}/${maxRetries})...`);
-                    retryCount++;
-                    await new Promise(resolve => setTimeout(resolve, retryDelay * retryCount));
-                    return attemptFetch();
-                }
-
-                console.error('Fehler beim Laden des täglichen Rankings:', error);
-                toast.error('Fehler beim Laden des täglichen Rankings');
-                setDailyRankings([]);
-            } finally {
-                setLoading(false);
+        return () => {
+            isMounted = false;
+            if (retryTimeout) {
+                clearTimeout(retryTimeout);
             }
         };
-
-        await attemptFetch();
-    };
+    }, [router, selectedDate]);
 
     // Behandle Änderung des ausgewählten Datums
     const handleDateChange = async (e) => {
@@ -123,7 +254,7 @@ function RankingsContent() {
                     <CardContent>
                         {loading ? (
                             <div className="text-center py-8">Lade Rangliste...</div>
-                        ) : allTimeRankings.length === 0 ? (
+                        ) : rankings.length === 0 ? (
                             <div className="text-center py-8 text-zinc-500">
                                 Noch keine Spielergebnisse vorhanden.
                             </div>
@@ -140,7 +271,7 @@ function RankingsContent() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {allTimeRankings.map((player, index) => (
+                                        {rankings.map((player, index) => (
                                             <tr
                                                 key={player.player_id}
                                                 className={`border-b border-zinc-800 ${index === 0 ? 'bg-secondary text-white' : ''}`}

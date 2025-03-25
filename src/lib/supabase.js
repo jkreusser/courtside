@@ -490,16 +490,16 @@ export async function updateProfile(userId, updates) {
 
 // Cache für Abfrageergebnisse mit Ablaufzeiten
 const queryCache = {
-    players: { data: null, timestamp: 0 },
-    rankings: { data: null, timestamp: 0 },
-    dailyRankings: { data: {}, timestamp: {} }
+    players: { data: null, timestamp: 0, version: 0 },
+    rankings: { data: null, timestamp: 0, version: 0 },
+    dailyRankings: { data: {}, timestamp: {}, version: 0 }
 };
 
 // Cache-Gültigkeitsdauer in Millisekunden
-const CACHE_DURATION = 5 * 60 * 1000; // 5 Minuten
+const CACHE_DURATION = 2 * 60 * 1000; // 2 Minuten
 
 // Hilfsfunktion für Wiederholungsversuche bei Datenbankabfragen
-async function retryQuery(queryFn, maxRetries = 3, delayMs = 500) {
+async function retryQuery(queryFn, maxRetries = 5, initialDelayMs = 1000) {
     let lastError = null;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
@@ -509,7 +509,9 @@ async function retryQuery(queryFn, maxRetries = 3, delayMs = 500) {
             console.warn(`Datenbankabfrage fehlgeschlagen (Versuch ${attempt + 1}/${maxRetries}):`, error);
             lastError = error;
             if (attempt < maxRetries - 1) {
-                await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+                // Exponentielles Backoff mit zufälliger Jitter
+                const delay = initialDelayMs * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
+                await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
     }
@@ -529,7 +531,7 @@ export const getPlayers = async (useCache = true) => {
         const result = await retryQuery(async () => {
             return await supabase
                 .from('players')
-                .select('id, name, email')  // Explizit nur benötigte Felder auswählen
+                .select('id, name, email')
                 .order('name');
         });
 
@@ -537,6 +539,7 @@ export const getPlayers = async (useCache = true) => {
         if (result.data && !result.error) {
             queryCache.players.data = result.data;
             queryCache.players.timestamp = Date.now();
+            queryCache.players.version++;
         }
 
         return result;
@@ -558,17 +561,19 @@ export const getRankings = async (useCache = true, limit = 50) => {
         const result = await retryQuery(async () => {
             return await supabase
                 .rpc('get_all_time_rankings')
-                .limit(limit);  // Begrenze die Ergebnisse
+                .limit(limit);
         });
 
         // Aktualisiere Cache
         if (result.data && !result.error) {
             queryCache.rankings.data = result.data;
             queryCache.rankings.timestamp = Date.now();
+            queryCache.rankings.version++;
         }
 
         return result;
     } catch (error) {
+        // Keine Toast-Nachricht mehr hier
         console.error('Fehler beim Laden der Rangliste (nach Wiederholungen):', error);
         return { data: null, error };
     }
@@ -586,17 +591,19 @@ export const getDailyRankings = async (date, useCache = true, limit = 50) => {
         const result = await retryQuery(async () => {
             return await supabase
                 .rpc('get_daily_rankings', { target_date: date })
-                .limit(limit);  // Begrenze die Ergebnisse
+                .limit(limit);
         });
 
         // Aktualisiere Cache
         if (result.data && !result.error) {
             queryCache.dailyRankings.data[date] = result.data;
             queryCache.dailyRankings.timestamp[date] = Date.now();
+            queryCache.dailyRankings.version++;
         }
 
         return result;
     } catch (error) {
+        // Keine Toast-Nachricht mehr hier
         console.error(`Fehler beim Laden des Rankings für ${date} (nach Wiederholungen):`, error);
         return { data: null, error };
     }
@@ -607,14 +614,17 @@ export const invalidateCache = (key = null) => {
     if (key === 'players' || key === null) {
         queryCache.players.data = null;
         queryCache.players.timestamp = 0;
+        queryCache.players.version++;
     }
     if (key === 'rankings' || key === null) {
         queryCache.rankings.data = null;
         queryCache.rankings.timestamp = 0;
+        queryCache.rankings.version++;
     }
     if (key === 'dailyRankings' || key === null) {
         queryCache.dailyRankings.data = {};
         queryCache.dailyRankings.timestamp = {};
+        queryCache.dailyRankings.version++;
     }
 };
 

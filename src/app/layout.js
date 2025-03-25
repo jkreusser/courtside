@@ -49,11 +49,16 @@ export default function RootLayout({ children }) {
       <head>
         <link rel="icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
-        <meta name="theme-color" content="#FFFFFF" />
+        {/* PWA Icons */}
+        <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+        <link rel="icon" type="image/png" sizes="384x384" href="/icons/icon-384x384.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512x512.png" />
+        <meta name="theme-color" content="#7BF1A8" />
         {/* Performance Metatags */}
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta httpEquiv="Cache-Control" content="max-age=3600, public" />
         {/* Sofortiges Erkennen mobiler Geräte und Anwenden der Klasse vor Rendering */}
         <script dangerouslySetInnerHTML={{
@@ -105,11 +110,13 @@ export default function RootLayout({ children }) {
           <Suspense fallback={null}>
             <PageTransitionScript />
           </Suspense>
-          <div className="flex flex-col min-h-screen overflow-y-auto">
-            <Header />
-            <main className="flex-1 container mx-auto px-4 py-4 sm:py-8 overflow-y-auto">
+          <div className="flex flex-col min-h-screen">
+            <div className="relative">
+              <Header />
+            </div>
+            <main className="flex-1 container mx-auto px-4 py-4 sm:py-8">
               <div className="page-transition-wrapper">
-                <div className="page-content overflow-y-auto">
+                <div className="page-content">
                   {children}
                 </div>
               </div>

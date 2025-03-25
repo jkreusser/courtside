@@ -58,7 +58,10 @@ export default function ProfilePage() {
     useEffect(() => {
         if (!authLoading && !user) {
             router.push('/login');
-            toast.error('Bitte melde dich an, um dein Profil zu bearbeiten');
+            // Zeige die Fehlermeldung nur, wenn die Seite direkt aufgerufen wurde
+            if (!document.referrer.includes('/login')) {
+                toast.error('Bitte melde dich an, um dein Profil zu bearbeiten');
+            }
         }
     }, [user, authLoading, router]);
 

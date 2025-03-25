@@ -374,3 +374,9 @@ body {
   overflow-x: hidden;
   overflow-y: auto;
 }
+
+/* Header sollte nicht sticky sein */
+header.bg-zinc-950 {
+  position: relative;
+  z-index: 10;
+}

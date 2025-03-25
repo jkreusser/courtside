@@ -30,105 +30,232 @@ export default function ScheduleDetailPage() {
 
     // Lade den Spielplan und die Matches
     useEffect(() => {
+        let isMounted = true;
+        let retryTimeout;
+
         const fetchScheduleData = async () => {
-            if (!user || !id) return;
+            if (!user) return;
 
             try {
                 setLoading(true);
 
-                // Lade den Spielplan mit Ersteller-Informationen
+                // Optimierte Spielplan-Abfrage mit spezifischer Feldauswahl
                 const { data: scheduleData, error: scheduleError } = await supabase
                     .from('schedules')
-                    .select('*')
+                    .select(`
+                        id,
+                        name,
+                        created_at,
+                        court_count,
+                        created_by
+                    `)
                     .eq('id', id)
-                    .single();
+                    .single()
+                    .throwOnError();
 
                 if (scheduleError) {
-                    console.error('Fehler beim Laden des Spielplans:', scheduleError);
-                    toast.error('Fehler beim Laden des Spielplans');
-
-                    // Warte kurz und versuche es nochmal
-                    setTimeout(() => {
-                        router.refresh();
-                    }, 1500);
-                    return;
+                    throw scheduleError;
                 }
 
                 if (!scheduleData) {
                     toast.error('Spielplan nicht gefunden');
-                    router.push('/games');
+                    router.push('/games/schedules');
                     return;
                 }
 
-                setSchedule(scheduleData);
-                // Jeder angemeldete Benutzer darf löschen
-                setIsOwner(true);
+                if (isMounted) {
+                    setSchedule(scheduleData);
+                }
 
-                // Lade alle Matches für diesen Spielplan mit Spielerinformationen
+                // Optimierte Matches-Abfrage mit spezifischer Feldauswahl
                 const { data: matchesData, error: matchesError } = await supabase
                     .from('schedule_matches')
-                    .select('*')
+                    .select(`
+                        id,
+                        round,
+                        player1_id,
+                        player2_id,
+                        schedule_id
+                    `)
                     .eq('schedule_id', id)
                     .order('round', { ascending: true })
-                    .order('court', { ascending: true });
+                    .throwOnError();
 
                 if (matchesError) {
-                    console.error('Fehler beim Laden der Matches:', matchesError);
-                    toast.error('Fehler beim Laden der Matches');
-                    return;
+                    throw matchesError;
                 }
 
-                // Sammle alle eindeutigen Spieler-IDs
-                const playerIds = new Set();
-                matchesData.forEach(match => {
-                    if (match.player1_id) playerIds.add(match.player1_id);
-                    if (match.player2_id) playerIds.add(match.player2_id);
-                });
+                if (isMounted) {
+                    // Sammle einzigartige Spieler-IDs
+                    const playerIds = new Set();
+                    matchesData.forEach(match => {
+                        if (match.player1_id) playerIds.add(match.player1_id);
+                        if (match.player2_id) playerIds.add(match.player2_id);
+                    });
+                    // Füge den Ersteller des Spielplans hinzu
+                    if (scheduleData.created_by) playerIds.add(scheduleData.created_by);
 
-                // Lade Spielernamen
-                if (playerIds.size > 0) {
-                    const { data: playersData, error: playersError } = await supabase
-                        .from('players')
-                        .select('id, name')
-                        .in('id', Array.from(playerIds));
+                    // Lade Spielernamen in einem Batch
+                    if (playerIds.size > 0) {
+                        const { data: playersData, error: playersError } = await supabase
+                            .from('players')
+                            .select('id, name')
+                            .in('id', Array.from(playerIds))
+                            .throwOnError();
 
-                    if (!playersError && playersData) {
-                        const namesMap = {};
-                        playersData.forEach(player => {
-                            namesMap[player.id] = player.name;
-                        });
-                        setPlayerNames(namesMap);
-                    } else {
-                        console.error('Fehler beim Laden der Spielernamen:', playersError);
+                        if (!playersError && playersData) {
+                            const namesMap = {};
+                            playersData.forEach(player => {
+                                namesMap[player.id] = player.name;
+                            });
+                            if (isMounted) {
+                                setPlayerNames(namesMap);
+                            }
+                        }
+                    }
+
+                    // Gruppiere Matches nach Runden
+                    const matchesByRound = {};
+                    matchesData.forEach(match => {
+                        if (!matchesByRound[match.round]) {
+                            matchesByRound[match.round] = [];
+                        }
+                        matchesByRound[match.round].push(match);
+                    });
+
+                    if (isMounted) {
+                        setMatches(matchesByRound);
                     }
                 }
-
-                // Gruppiere Matches nach Runden
-                const matchesByRound = {};
-                matchesData.forEach(match => {
-                    if (!matchesByRound[match.round]) {
-                        matchesByRound[match.round] = [];
-                    }
-                    matchesByRound[match.round].push(match);
-                });
-
-                setMatches(matchesByRound);
             } catch (error) {
-                console.error('Unerwarteter Fehler beim Laden des Spielplans:', error);
+                console.error('Fehler beim Laden des Spielplans:', error);
                 toast.error('Fehler beim Laden des Spielplans');
 
-                // Warte kurz und versuche es nochmal
-                setTimeout(() => {
-                    router.refresh();
-                }, 1500);
+                // Wiederholungsversuch mit exponentieller Verzögerung
+                let retryCount = 0;
+                const maxRetries = 5;
+                const retryWithBackoff = async () => {
+                    if (retryCount >= maxRetries || !isMounted) return;
+
+                    retryCount++;
+                    const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
+                    console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
+
+                    await new Promise(resolve => setTimeout(resolve, delay));
+
+                    try {
+                        // Wiederhole die Spielplan-Abfrage
+                        const { data: retryScheduleData, error: retryScheduleError } = await supabase
+                            .from('schedules')
+                            .select(`
+                                id,
+                                name,
+                                created_at,
+                                court_count,
+                                created_by
+                            `)
+                            .eq('id', id)
+                            .single()
+                            .throwOnError();
+
+                        if (retryScheduleError) {
+                            throw retryScheduleError;
+                        }
+
+                        // Wiederhole die Matches-Abfrage
+                        const { data: retryMatchesData, error: retryMatchesError } = await supabase
+                            .from('schedule_matches')
+                            .select(`
+                                id,
+                                round,
+                                player1_id,
+                                player2_id,
+                                schedule_id
+                            `)
+                            .eq('schedule_id', id)
+                            .order('round', { ascending: true })
+                            .throwOnError();
+
+                        if (retryMatchesError) {
+                            throw retryMatchesError;
+                        }
+
+                        if (isMounted) {
+                            setSchedule(retryScheduleData);
+
+                            // Sammle einzigartige Spieler-IDs
+                            const playerIds = new Set();
+                            retryMatchesData.forEach(match => {
+                                if (match.player1_id) playerIds.add(match.player1_id);
+                                if (match.player2_id) playerIds.add(match.player2_id);
+                            });
+                            // Füge den Ersteller des Spielplans hinzu
+                            if (retryScheduleData.created_by) playerIds.add(retryScheduleData.created_by);
+
+                            // Lade Spielernamen in einem Batch
+                            if (playerIds.size > 0) {
+                                const { data: retryPlayersData, error: retryPlayersError } = await supabase
+                                    .from('players')
+                                    .select('id, name')
+                                    .in('id', Array.from(playerIds))
+                                    .throwOnError();
+
+                                if (!retryPlayersError && retryPlayersData) {
+                                    const namesMap = {};
+                                    retryPlayersData.forEach(player => {
+                                        namesMap[player.id] = player.name;
+                                    });
+                                    setPlayerNames(namesMap);
+                                }
+                            }
+
+                            // Gruppiere Matches nach Runden
+                            const matchesByRound = {};
+                            retryMatchesData.forEach(match => {
+                                if (!matchesByRound[match.round]) {
+                                    matchesByRound[match.round] = [];
+                                }
+                                matchesByRound[match.round].push(match);
+                            });
+
+                            setMatches(matchesByRound);
+                            return true;
+                        }
+                    } catch (retryError) {
+                        console.error('Fehler beim Wiederholungsversuch:', retryError);
+                    }
+
+                    if (retryCount < maxRetries && isMounted) {
+                        return retryWithBackoff();
+                    }
+
+                    return false;
+                };
+
+                const success = await retryWithBackoff();
+                if (!success && isMounted) {
+                    // Setze einen Timeout für den nächsten Versuch
+                    retryTimeout = setTimeout(() => {
+                        router.refresh();
+                    }, 5000);
+                }
             } finally {
-                setLoading(false);
+                if (isMounted) {
+                    setLoading(false);
+                }
             }
         };
 
         if (user && !authLoading) {
             fetchScheduleData();
         }
+
+        return () => {
+            isMounted = false;
+            if (retryTimeout) {
+                clearTimeout(retryTimeout);
+            }
+        };
     }, [id, user, authLoading, router]);
 
     // Hilfsfunktion zum Anzeigen des Spielernamens
@@ -295,14 +422,14 @@ export default function ScheduleDetailPage() {
                         <CardContent>
                             {/* Mobile Ansicht */}
                             <div className="md:hidden space-y-4">
-                                {matches[round].map((match) => (
+                                {matches[round].map((match, index) => (
                                     <div
                                         key={match.id}
                                         className="border border-zinc-800 rounded-lg p-4"
                                     >
                                         <div className="flex justify-between items-center mb-2">
                                             <div className="text-sm text-zinc-400">
-                                                Court {match.court}
+                                                Court {(index % schedule.court_count) + 1}
                                             </div>
                                         </div>
                                         <div className="font-medium">
@@ -324,12 +451,12 @@ export default function ScheduleDetailPage() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {matches[round].map((match) => (
+                                        {matches[round].map((match, index) => (
                                             <tr
                                                 key={match.id}
                                                 className="border-b border-zinc-800 hover:bg-zinc-800/50 transition-colors"
                                             >
-                                                <td className="py-3 px-4">Court {match.court}</td>
+                                                <td className="py-3 px-4">{(index % schedule.court_count) + 1}</td>
                                                 <td className="py-3 px-4">{getPlayerName(match.player1_id)}</td>
                                                 <td className="py-3 px-4 text-center">vs</td>
                                                 <td className="py-3 px-4">{getPlayerName(match.player2_id)}</td>

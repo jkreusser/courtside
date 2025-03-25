@@ -33,33 +33,41 @@ export default function GameDetailPage({ params }) {
 
     // Lade Spieldetails
     useEffect(() => {
+        let isMounted = true;
+        let retryTimeout;
+
         const fetchGame = async () => {
             if (!user) return;
 
             try {
                 setLoading(true);
 
-                // Lade Spieldetails, einschließlich Spieler und Ergebnisse
+                // Optimierte Spieleabfrage mit spezifischer Feldauswahl
                 const { data, error } = await supabase
                     .from('games')
                     .select(`
-            *,
-            player1:player1_id(*),
-            player2:player2_id(*),
-            scores(*)
-          `)
+                        id,
+                        status,
+                        created_at,
+                        player1_id,
+                        player2_id,
+                        winner_id,
+                        sets_to_win,
+                        player1:player1_id(id, name),
+                        player2:player2_id(id, name),
+                        scores(
+                            id,
+                            player1_score,
+                            player2_score,
+                            created_at
+                        )
+                    `)
                     .eq('id', id)
-                    .single();
+                    .single()
+                    .throwOnError();
 
                 if (error) {
-                    console.error('Fehler beim Laden des Spiels:', error);
-                    toast.error('Fehler beim Laden des Spiels');
-
-                    // Warte kurz und versuche es nochmal
-                    setTimeout(() => {
-                        router.refresh();
-                    }, 1500);
-                    return;
+                    throw error;
                 }
 
                 if (!data) {
@@ -68,38 +76,114 @@ export default function GameDetailPage({ params }) {
                     return;
                 }
 
-                setGame(data);
-                setPlayers({
-                    player1: data.player1,
-                    player2: data.player2
-                });
+                if (isMounted) {
+                    setGame(data);
+                    setPlayers({
+                        player1: data.player1,
+                        player2: data.player2
+                    });
 
-                // Sortiere Ergebnisse nach Erstellungsdatum
-                const sortedScores = data.scores ?
-                    [...data.scores].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)) :
-                    [];
-                setScores(sortedScores);
+                    // Sortiere Ergebnisse nach Erstellungsdatum
+                    const sortedScores = data.scores ?
+                        [...data.scores].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)) :
+                        [];
+                    setScores(sortedScores);
 
-                // Überprüfe, ob der aktuelle Benutzer ein Teilnehmer des Spiels ist
-                // Beide Teilnehmer dürfen das Spiel bearbeiten und löschen
-                const userIsParticipant = user.id === data.player1_id || user.id === data.player2_id;
-                setIsParticipant(userIsParticipant);
+                    // Überprüfe, ob der aktuelle Benutzer ein Teilnehmer des Spiels ist
+                    const userIsParticipant = user.id === data.player1_id || user.id === data.player2_id;
+                    setIsParticipant(userIsParticipant);
+                }
             } catch (error) {
-                console.error('Unerwarteter Fehler beim Laden des Spiels:', error);
+                console.error('Fehler beim Laden des Spiels:', error);
                 toast.error('Fehler beim Laden des Spiels');
 
-                // Warte kurz und versuche es nochmal
-                setTimeout(() => {
-                    router.refresh();
-                }, 1500);
+                // Wiederholungsversuch mit exponentieller Verzögerung
+                let retryCount = 0;
+                const maxRetries = 5;
+                const retryWithBackoff = async () => {
+                    if (retryCount >= maxRetries || !isMounted) return;
+
+                    retryCount++;
+                    const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
+                    console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
+
+                    await new Promise(resolve => setTimeout(resolve, delay));
+
+                    try {
+                        const { data: retryData, error: retryError } = await supabase
+                            .from('games')
+                            .select(`
+                                id,
+                                status,
+                                created_at,
+                                player1_id,
+                                player2_id,
+                                winner_id,
+                                sets_to_win,
+                                player1:player1_id(id, name),
+                                player2:player2_id(id, name),
+                                scores(
+                                    id,
+                                    player1_score,
+                                    player2_score,
+                                    created_at
+                                )
+                            `)
+                            .eq('id', id)
+                            .single()
+                            .throwOnError();
+
+                        if (!retryError && retryData && isMounted) {
+                            setGame(retryData);
+                            setPlayers({
+                                player1: retryData.player1,
+                                player2: retryData.player2
+                            });
+
+                            const sortedScores = retryData.scores ?
+                                [...retryData.scores].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)) :
+                                [];
+                            setScores(sortedScores);
+
+                            const userIsParticipant = user.id === retryData.player1_id || user.id === retryData.player2_id;
+                            setIsParticipant(userIsParticipant);
+                            return true;
+                        }
+                    } catch (retryError) {
+                        console.error('Fehler beim Wiederholungsversuch:', retryError);
+                    }
+
+                    if (retryCount < maxRetries && isMounted) {
+                        return retryWithBackoff();
+                    }
+
+                    return false;
+                };
+
+                const success = await retryWithBackoff();
+                if (!success && isMounted) {
+                    // Setze einen Timeout für den nächsten Versuch
+                    retryTimeout = setTimeout(() => {
+                        router.refresh();
+                    }, 5000);
+                }
             } finally {
-                setLoading(false);
+                if (isMounted) {
+                    setLoading(false);
+                }
             }
         };
 
         if (user && !authLoading) {
             fetchGame();
         }
+
+        return () => {
+            isMounted = false;
+            if (retryTimeout) {
+                clearTimeout(retryTimeout);
+            }
+        };
     }, [id, user, authLoading, router]);
 
     // Füge ein neues Ergebnis hinzu
@@ -120,83 +204,82 @@ export default function GameDetailPage({ params }) {
             return;
         }
 
+        // Berechne die maximale Anzahl der Sätze
+        const setsToWin = game.sets_to_win || 3;
+        const maxSets = setsToWin * 2 - 1; // Best of 5 = 5 Sätze, Best of 3 = 3 Sätze, Best of 1 = 1 Satz
+
+        // Überprüfe, ob die maximale Anzahl der Sätze bereits erreicht ist
+        if (scores.length >= maxSets) {
+            toast.error(`Das Spiel kann maximal ${maxSets} Sätze haben`);
+            return;
+        }
+
         try {
-            setAddingScore(true);
+            setLoading(true);
 
             // Füge das neue Ergebnis hinzu
             const { data, error } = await supabase
                 .from('scores')
-                .insert({
-                    game_id: id,
-                    player1_score: player1Score,
-                    player2_score: player2Score
-                })
+                .insert([
+                    {
+                        game_id: id,
+                        player1_score: player1Score,
+                        player2_score: player2Score
+                    }
+                ])
                 .select()
-                .single();
+                .single()
+                .throwOnError();
 
             if (error) {
                 throw error;
             }
 
-            toast.success('Ergebnis erfolgreich hinzugefügt');
+            // Aktualisiere den lokalen State
+            setScores(prevScores => [...prevScores, data].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
 
             // Setze das Formular zurück
             setNewScore({ player1_score: '', player2_score: '' });
 
-            // Aktualisiere die Ergebnisliste
-            setScores([...scores, data]);
+            // Überprüfe, ob das Spiel beendet ist
+            const player1Sets = scores.filter(score => score.player1_score > score.player2_score).length + (player1Score > player2Score ? 1 : 0);
+            const player2Sets = scores.filter(score => score.player2_score > score.player1_score).length + (player2Score > player1Score ? 1 : 0);
 
-            // Prüfe, ob das Spiel abgeschlossen ist
-            checkGameCompletion([...scores, data]);
-        } catch (error) {
-            toast.error(`Fehler beim Hinzufügen des Ergebnisses: ${error.message}`);
-            console.error(error);
-        } finally {
-            setAddingScore(false);
-        }
-    };
+            // Beende das Spiel, wenn ein Spieler die erforderlichen Sätze gewonnen hat oder die maximale Anzahl der Sätze erreicht wurde
+            if (player1Sets >= setsToWin || player2Sets >= setsToWin || scores.length + 1 >= maxSets) {
+                // Ermittle den Gewinner (bei maximaler Satzanzahl ist es der Spieler mit mehr gewonnenen Sätzen)
+                const winnerId = player1Sets > player2Sets ? game.player1_id : game.player2_id;
 
-    // Prüfe, ob das Spiel abgeschlossen ist (basierend auf der eingestellten Anzahl der Sätze)
-    const checkGameCompletion = async (currentScores) => {
-        if (!currentScores.length) return;
-
-        const player1Wins = currentScores.filter(score => score.player1_score > score.player2_score).length;
-        const player2Wins = currentScores.filter(score => score.player2_score > score.player1_score).length;
-
-        // Verwende die festgelegte Anzahl der Sätze zum Sieg
-        const setsToWin = game.sets_to_win || 3; // Fallback auf 3, falls nicht definiert
-
-        // Prüfe, ob einer der Spieler die erforderliche Anzahl an Sätzen gewonnen hat
-        if (player1Wins >= setsToWin || player2Wins >= setsToWin) {
-            const winner = player1Wins > player2Wins ? game.player1_id : game.player2_id;
-
-            try {
-                const { error } = await supabase
+                // Aktualisiere den Spielstatus
+                const { error: updateError } = await supabase
                     .from('games')
                     .update({
                         status: 'completed',
-                        winner_id: winner
+                        winner_id: winnerId
                     })
-                    .eq('id', id);
+                    .eq('id', id)
+                    .throwOnError();
 
-                if (error) {
-                    throw error;
+                if (updateError) {
+                    throw updateError;
                 }
 
-                // Aktualisiere den Spielstatus
+                // Aktualisiere den lokalen State
                 setGame(prev => ({
                     ...prev,
                     status: 'completed',
-                    winner_id: winner
+                    winner_id: winnerId
                 }));
 
-                toast.success(`Spiel abgeschlossen! ${player1Wins > player2Wins ? players.player1.name : players.player2.name} hat gewonnen!`);
-
-                // Überprüfe und schalte Achievements frei
-                await checkAchievements(winner);
-            } catch (error) {
-                console.error('Fehler beim Aktualisieren des Spielstatus:', error);
+                toast.success('Spiel beendet!');
             }
+
+            toast.success('Ergebnis hinzugefügt!');
+        } catch (error) {
+            console.error('Fehler beim Hinzufügen des Ergebnisses:', error);
+            toast.error('Fehler beim Hinzufügen des Ergebnisses');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -755,12 +838,19 @@ export default function GameDetailPage({ params }) {
                                 ></div>
                             </div>
                             <div className="mt-1 text-xs text-zinc-500">
-                                {player1Sets > player2Sets
-                                    ? `${players.player1?.name} braucht noch ${(game.sets_to_win || 3) - player1Sets} ${(game.sets_to_win || 3) - player1Sets === 1 ? 'Satz' : 'Sätze'} zum Sieg`
-                                    : player2Sets > player1Sets
-                                        ? `${players.player2?.name} braucht noch ${(game.sets_to_win || 3) - player2Sets} ${(game.sets_to_win || 3) - player2Sets === 1 ? 'Satz' : 'Sätze'} zum Sieg`
-                                        : `Beide Spieler brauchen ${game.sets_to_win || 3} Sätze zum Sieg`
-                                }
+                                {game.status === 'completed' ? (
+                                    game.winner_id === players.player1?.id ? (
+                                        `${players.player1?.name} hat gewonnen!`
+                                    ) : (
+                                        `${players.player2?.name} hat gewonnen!`
+                                    )
+                                ) : (
+                                    player1Sets > player2Sets
+                                        ? `${players.player1?.name} braucht noch ${(game.sets_to_win || 3) - player1Sets} ${(game.sets_to_win || 3) - player1Sets === 1 ? 'Satz' : 'Sätze'} zum Sieg`
+                                        : player2Sets > player1Sets
+                                            ? `${players.player2?.name} braucht noch ${(game.sets_to_win || 3) - player2Sets} ${(game.sets_to_win || 3) - player2Sets === 1 ? 'Satz' : 'Sätze'} zum Sieg`
+                                            : `${players.player1?.name} und ${players.player2?.name} brauchen noch ${(game.sets_to_win || 3) - player1Sets} ${(game.sets_to_win || 3) - player1Sets === 1 ? 'Satz' : 'Sätze'} zum Sieg`
+                                )}
                             </div>
                         </div>
                     </div>

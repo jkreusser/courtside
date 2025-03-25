@@ -94,7 +94,8 @@ export default function LoginPage() {
                 if (error && error.message && (
                     error.message.includes('Invalid login credentials') ||
                     error.message.includes('User not found') ||
-                    error.message.includes('Benutzer nicht gefunden')
+                    error.message.includes('Benutzer nicht gefunden') ||
+                    (error.name === 'AuthApiError' && error.status === 400)
                 )) {
                     setLoadingState('Benutzer nicht gefunden');
                     setIsNewUser(true);

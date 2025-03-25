@@ -18,6 +18,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [rankings, setRankings] = useState([]);
+  const [playerNames, setPlayerNames] = useState({});
+  const [recentGames, setRecentGames] = useState([]);
+  const [recentPlayers, setRecentPlayers] = useState([]);
 
   // Wenn angemeldet, lade Spiele des Benutzers
   useEffect(() => {
@@ -229,6 +232,225 @@ export default function DashboardPage() {
     fetchPlayers();
   }, [user]);  // Abhängigkeit auf den Benutzer hinzugefügt
 
+  useEffect(() => {
+    let isMounted = true;
+    let retryTimeout;
+
+    const fetchDashboardData = async () => {
+      if (!user) return;
+
+      try {
+        setLoading(true);
+
+        // Optimierte Spiele-Abfrage mit spezifischer Feldauswahl
+        const { data: gamesData, error: gamesError } = await supabase
+          .from('games')
+          .select(`
+            id,
+            player1_id,
+            player2_id,
+            status,
+            created_at,
+            updated_at,
+            scores (
+              id,
+              player1_score,
+              player2_score
+            )
+          `)
+          .order('created_at', { ascending: false })
+          .limit(5)
+          .throwOnError();
+
+        if (gamesError) {
+          throw gamesError;
+        }
+
+        // Optimierte Spieler-Abfrage mit spezifischer Feldauswahl
+        const { data: playersData, error: playersError } = await supabase
+          .from('players')
+          .select(`
+            id,
+            name,
+            created_at
+          `)
+          .order('created_at', { ascending: false })
+          .limit(5)
+          .throwOnError();
+
+        if (playersError) {
+          throw playersError;
+        }
+
+        if (isMounted) {
+          // Sammle einzigartige Spieler-IDs
+          const playerIds = new Set();
+          gamesData.forEach(game => {
+            if (game.player1_id) playerIds.add(game.player1_id);
+            if (game.player2_id) playerIds.add(game.player2_id);
+          });
+
+          // Lade Spielernamen in einem Batch
+          if (playerIds.size > 0) {
+            const { data: playerNamesData, error: playerNamesError } = await supabase
+              .from('players')
+              .select('id, name')
+              .in('id', Array.from(playerIds))
+              .throwOnError();
+
+            if (!playerNamesError && playerNamesData) {
+              const namesMap = {};
+              playerNamesData.forEach(player => {
+                namesMap[player.id] = player.name;
+              });
+              if (isMounted) {
+                setPlayerNames(namesMap);
+              }
+            }
+          }
+
+          // Verarbeite die Spiele-Daten
+          const processedGames = gamesData.map(game => ({
+            ...game,
+            player1_name: playerNames[game.player1_id] || `Spieler ${game.player1_id.substring(0, 8)}...`,
+            player2_name: playerNames[game.player2_id] || `Spieler ${game.player2_id.substring(0, 8)}...`
+          }));
+
+          if (isMounted) {
+            setRecentGames(processedGames);
+            setRecentPlayers(playersData);
+          }
+        }
+      } catch (error) {
+        console.error('Fehler beim Laden der Dashboard-Daten:', error);
+        toast.error('Fehler beim Laden der Dashboard-Daten');
+
+        // Wiederholungsversuch mit exponentieller Verzögerung
+        let retryCount = 0;
+        const maxRetries = 5;
+        const retryWithBackoff = async () => {
+          if (retryCount >= maxRetries || !isMounted) return;
+
+          retryCount++;
+          const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
+          console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
+
+          await new Promise(resolve => setTimeout(resolve, delay));
+
+          try {
+            // Wiederhole die Spiele-Abfrage
+            const { data: retryGamesData, error: retryGamesError } = await supabase
+              .from('games')
+              .select(`
+                id,
+                player1_id,
+                player2_id,
+                status,
+                created_at,
+                updated_at,
+                scores (
+                  id,
+                  player1_score,
+                  player2_score
+                )
+              `)
+              .order('created_at', { ascending: false })
+              .limit(5)
+              .throwOnError();
+
+            if (retryGamesError) {
+              throw retryGamesError;
+            }
+
+            // Wiederhole die Spieler-Abfrage
+            const { data: retryPlayersData, error: retryPlayersError } = await supabase
+              .from('players')
+              .select(`
+                id,
+                name,
+                created_at
+              `)
+              .order('created_at', { ascending: false })
+              .limit(5)
+              .throwOnError();
+
+            if (retryPlayersError) {
+              throw retryPlayersError;
+            }
+
+            if (isMounted) {
+              // Sammle einzigartige Spieler-IDs
+              const playerIds = new Set();
+              retryGamesData.forEach(game => {
+                if (game.player1_id) playerIds.add(game.player1_id);
+                if (game.player2_id) playerIds.add(game.player2_id);
+              });
+
+              // Lade Spielernamen in einem Batch
+              if (playerIds.size > 0) {
+                const { data: retryPlayerNamesData, error: retryPlayerNamesError } = await supabase
+                  .from('players')
+                  .select('id, name')
+                  .in('id', Array.from(playerIds))
+                  .throwOnError();
+
+                if (!retryPlayerNamesError && retryPlayerNamesData) {
+                  const namesMap = {};
+                  retryPlayerNamesData.forEach(player => {
+                    namesMap[player.id] = player.name;
+                  });
+                  setPlayerNames(namesMap);
+                }
+              }
+
+              // Verarbeite die Spiele-Daten
+              const processedGames = retryGamesData.map(game => ({
+                ...game,
+                player1_name: playerNames[game.player1_id] || `Spieler ${game.player1_id.substring(0, 8)}...`,
+                player2_name: playerNames[game.player2_id] || `Spieler ${game.player2_id.substring(0, 8)}...`
+              }));
+
+              setRecentGames(processedGames);
+              setRecentPlayers(retryPlayersData);
+              return true;
+            }
+          } catch (retryError) {
+            console.error('Fehler beim Wiederholungsversuch:', retryError);
+          }
+
+          if (retryCount < maxRetries && isMounted) {
+            return retryWithBackoff();
+          }
+
+          return false;
+        };
+
+        const success = await retryWithBackoff();
+        if (!success && isMounted) {
+          // Setze einen Timeout für den nächsten Versuch
+          retryTimeout = setTimeout(() => {
+            router.refresh();
+          }, 5000);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    if (user && !authLoading) {
+      fetchDashboardData();
+    }
+
+    return () => {
+      isMounted = false;
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
+    };
+  }, [user, authLoading, router]);
+
   if (authLoading) {
     return <div className="text-center py-8">Lade...</div>;
   }
@@ -399,14 +621,14 @@ export default function DashboardPage() {
 
                 let statusBadge;
                 if (game.status === 'scheduled') {
-                  statusBadge = <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">Geplant</span>;
+                  statusBadge = <span className="px-2 py-1 text-xs rounded-full bg-zinc-800 text-white">Geplant</span>;
                 } else if (game.status === 'in_progress') {
-                  statusBadge = <span className="px-2 py-1 text-xs rounded-full bg-amber-100 text-amber-800">Läuft</span>;
+                  statusBadge = <span className="px-2 py-1 text-xs rounded-full bg-white text-black">Läuft</span>;
                 } else if (game.status === 'completed') {
                   const hasWon = game.winner_id === user.id;
                   statusBadge = hasWon
                     ? <span className="px-2 py-1 text-xs rounded-full bg-secondary text-primary">Gewonnen</span>
-                    : <span className="px-2 py-1 text-xs rounded-full bg-red-900 text-red-100">Verloren</span>;
+                    : <span className="px-2 py-1 text-xs rounded-full bg-zinc-800 text-white">Verloren</span>;
                 }
 
                 return (
@@ -504,6 +726,10 @@ export default function DashboardPage() {
                     filter="url(#shadow)"
                     fillOpacity={0.3}
                     fill="#0A100E"
+                    animationDuration={500}
+                    animationBegin={0}
+                    animationEasing="ease-out"
+                    isAnimationActive={true}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -576,6 +802,10 @@ export default function DashboardPage() {
                     filter="url(#shadow)"
                     fillOpacity={0.3}
                     fill="#0A100E"
+                    animationDuration={2000}
+                    animationBegin={0}
+                    animationEasing="ease-out"
+                    isAnimationActive={true}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -654,7 +884,6 @@ function generatePerformanceData(games, userId) {
 
   // Erstelle die Daten für das Diagramm
   const chartData = [];
-  let cumulativePointDiff = 0;
 
   sortedPeriods.forEach((period, idx) => {
     // Berechne die Statistiken für diese Periode
@@ -689,9 +918,6 @@ function generatePerformanceData(games, userId) {
     // Berechne die durchschnittliche Punktedifferenz pro Spiel für diese Periode
     const avgPointDiff = gamesInPeriod > 0 ? periodPointDiff / gamesInPeriod : 0;
 
-    // Kumuliere die Punktedifferenz für den Trend
-    cumulativePointDiff += periodPointDiff;
-
     // Füge die Daten für diese Periode zum Chart hinzu
     chartData.push({
       date: period.displayDate,
@@ -703,6 +929,18 @@ function generatePerformanceData(games, userId) {
         : periodPointDiff
     });
   });
+
+  // Stelle sicher, dass mindestens zwei Datenpunkte vorhanden sind
+  if (chartData.length === 1) {
+    chartData.push({
+      ...chartData[0],
+      date: 'Heute',
+      winrate: chartData[0].winrate,
+      punkteDifferenz: chartData[0].punkteDifferenz,
+      spiele: 0,
+      kumulativ: chartData[0].kumulativ
+    });
+  }
 
   return chartData;
 }
@@ -726,7 +964,7 @@ function generatePointDifferenceData(games, userId) {
   );
 
   // Erstelle die Daten für das Diagramm
-  return sortedGames.map((game, index) => {
+  const chartData = sortedGames.map((game, index) => {
     // Berechne Punktedifferenz für den aktuellen Spieler
     let pointDiff = 0;
     if (game.scores && game.scores.length) {
@@ -750,4 +988,19 @@ function generatePointDifferenceData(games, userId) {
       })
     };
   });
+
+  // Stelle sicher, dass mindestens drei Datenpunkte vorhanden sind
+  if (chartData.length < 3) {
+    const lastPoint = chartData[chartData.length - 1];
+    while (chartData.length < 3) {
+      chartData.push({
+        ...lastPoint,
+        gameNumber: chartData.length + 1,
+        punkteDifferenz: lastPoint.punkteDifferenz,
+        datum: 'Heute'
+      });
+    }
+  }
+
+  return chartData;
 }

@@ -33,14 +33,17 @@ function GamesPageContent() {
 
     // Lade alle Spiele
     useEffect(() => {
+        let isMounted = true;
+        let retryTimeout;
+
         const fetchGames = async () => {
             if (!user) return;
 
             try {
                 setLoading(true);
 
-                // Verbesserte Spiele-Abfrage mit Limitierung, Paginierung und spezifischer Attributselektion
-                const PAGE_SIZE = 20; // Anzahl der Spiele pro Seite
+                // Optimierte Spiele-Abfrage mit Limitierung und spezifischer Attributselektion
+                const PAGE_SIZE = 20;
                 const { data, error } = await supabase
                     .from('games')
                     .select(`
@@ -50,29 +53,39 @@ function GamesPageContent() {
                         player1_id, 
                         player2_id, 
                         winner_id,
+                        sets_to_win,
                         player1:player1_id(id, name),
                         player2:player2_id(id, name),
                         scores(id, player1_score, player2_score)
                     `)
                     .order('created_at', { ascending: false })
-                    .range(0, PAGE_SIZE - 1); // Erste Seite laden
+                    .range(0, PAGE_SIZE - 1)
+                    .throwOnError(); // Wirft einen Fehler bei Datenbankfehlern
 
                 if (error) {
-                    console.error('Fehler beim Laden der Spiele:', error);
-                    toast.error('Fehler beim Laden der Spiele');
+                    throw error;
+                }
 
-                    // Wiederholungsversuch mit exponentieller Verzögerung
-                    let retryCount = 0;
-                    const maxRetries = 3;
-                    const retryWithBackoff = async () => {
-                        if (retryCount >= maxRetries) return;
+                if (isMounted) {
+                    setGames(data || []);
+                }
+            } catch (error) {
+                console.error('Fehler beim Laden der Spiele:', error);
+                toast.error('Fehler beim Laden der Spiele');
 
-                        retryCount++;
-                        const delay = 1000 * Math.pow(2, retryCount - 1); // Exponentielles Backoff
-                        console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
+                // Wiederholungsversuch mit exponentieller Verzögerung
+                let retryCount = 0;
+                const maxRetries = 5;
+                const retryWithBackoff = async () => {
+                    if (retryCount >= maxRetries || !isMounted) return;
 
-                        await new Promise(resolve => setTimeout(resolve, delay));
+                    retryCount++;
+                    const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
+                    console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
 
+                    await new Promise(resolve => setTimeout(resolve, delay));
+
+                    try {
                         const { data: retryData, error: retryError } = await supabase
                             .from('games')
                             .select(`
@@ -82,44 +95,42 @@ function GamesPageContent() {
                                 player1_id, 
                                 player2_id, 
                                 winner_id,
+                                sets_to_win,
                                 player1:player1_id(id, name),
                                 player2:player2_id(id, name),
                                 scores(id, player1_score, player2_score)
                             `)
                             .order('created_at', { ascending: false })
-                            .range(0, PAGE_SIZE - 1);
+                            .range(0, PAGE_SIZE - 1)
+                            .throwOnError();
 
-                        if (!retryError) {
+                        if (!retryError && isMounted) {
                             setGames(retryData || []);
                             setLoading(false);
                             return true;
                         }
-
-                        if (retryCount < maxRetries) {
-                            return retryWithBackoff();
-                        }
-
-                        return false;
-                    };
-
-                    const success = await retryWithBackoff();
-                    if (!success) {
-                        router.refresh();
+                    } catch (retryError) {
+                        console.error('Fehler beim Wiederholungsversuch:', retryError);
                     }
-                    return;
+
+                    if (retryCount < maxRetries && isMounted) {
+                        return retryWithBackoff();
+                    }
+
+                    return false;
+                };
+
+                const success = await retryWithBackoff();
+                if (!success && isMounted) {
+                    // Setze einen Timeout für den nächsten Versuch
+                    retryTimeout = setTimeout(() => {
+                        router.refresh();
+                    }, 5000);
                 }
-
-                setGames(data || []);
-            } catch (error) {
-                console.error('Unerwarteter Fehler beim Laden der Spiele:', error);
-                toast.error('Fehler beim Laden der Spiele');
-
-                // Warte kurz und versuche es nochmal
-                setTimeout(() => {
-                    router.refresh();
-                }, 3000);
             } finally {
-                setLoading(false);
+                if (isMounted) {
+                    setLoading(false);
+                }
             }
         };
 
@@ -129,49 +140,59 @@ function GamesPageContent() {
             try {
                 setLoadingSchedules(true);
 
-                // Lade Spielpläne
+                // Optimierte Spielplan-Abfrage
                 const { data: schedulesData, error: schedulesError } = await supabase
                     .from('schedules')
-                    .select('*')
-                    .order('created_at', { ascending: false });
+                    .select('id, name, created_at, court_count')
+                    .order('created_at', { ascending: false })
+                    .throwOnError();
 
                 if (schedulesError) {
-                    console.error('Fehler beim Laden der Spielpläne:', schedulesError);
-                    toast.error('Fehler beim Laden der Spielpläne');
-                    return;
+                    throw schedulesError;
                 }
 
-                setSchedules(schedulesData || []);
+                if (isMounted) {
+                    setSchedules(schedulesData || []);
+                }
 
-                // Lade die Anzahl der Spieler pro Spielplan
+                // Lade die Anzahl der Spieler pro Spielplan in einem Batch
                 const counts = {};
-
                 if (schedulesData && schedulesData.length > 0) {
-                    for (const schedule of schedulesData) {
-                        const { data: matchesData, error: matchesError } = await supabase
-                            .from('schedule_matches')
-                            .select('player1_id, player2_id')
-                            .eq('schedule_id', schedule.id);
+                    const scheduleIds = schedulesData.map(s => s.id);
 
-                        if (!matchesError && matchesData) {
-                            // Sammle einzigartige Spieler-IDs
-                            const playerIds = new Set();
-                            matchesData.forEach(match => {
-                                if (match.player1_id) playerIds.add(match.player1_id);
-                                if (match.player2_id) playerIds.add(match.player2_id);
-                            });
+                    const { data: matchesData, error: matchesError } = await supabase
+                        .from('schedule_matches')
+                        .select('schedule_id, player1_id, player2_id')
+                        .in('schedule_id', scheduleIds)
+                        .throwOnError();
 
-                            counts[schedule.id] = playerIds.size;
+                    if (!matchesError && matchesData) {
+                        // Berechne die Anzahl der Spieler pro Spielplan
+                        matchesData.forEach(match => {
+                            if (!counts[match.schedule_id]) {
+                                counts[match.schedule_id] = new Set();
+                            }
+                            if (match.player1_id) counts[match.schedule_id].add(match.player1_id);
+                            if (match.player2_id) counts[match.schedule_id].add(match.player2_id);
+                        });
+
+                        // Konvertiere Sets zu Zahlen
+                        Object.keys(counts).forEach(scheduleId => {
+                            counts[scheduleId] = counts[scheduleId].size;
+                        });
+
+                        if (isMounted) {
+                            setPlayerCounts(counts);
                         }
                     }
                 }
-
-                setPlayerCounts(counts);
             } catch (error) {
                 console.error('Unerwarteter Fehler beim Laden der Spielpläne:', error);
                 toast.error('Fehler beim Laden der Spielpläne');
             } finally {
-                setLoadingSchedules(false);
+                if (isMounted) {
+                    setLoadingSchedules(false);
+                }
             }
         };
 
@@ -179,6 +200,13 @@ function GamesPageContent() {
             fetchGames();
             fetchSchedules();
         }
+
+        return () => {
+            isMounted = false;
+            if (retryTimeout) {
+                clearTimeout(retryTimeout);
+            }
+        };
     }, [user, authLoading, router]);
 
     // Gefilterte Spiele basierend auf dem ausgewählten Filter
@@ -210,9 +238,9 @@ function GamesPageContent() {
         if (status === 'completed') {
             return <span className="text-xs font-medium px-2 py-1 rounded-full bg-secondary text-primary">Abgeschlossen</span>;
         } else if (status === 'in_progress') {
-            return <span className="text-xs font-medium px-2 py-1 rounded-full bg-amber-800 text-amber-200">Läuft</span>;
+            return <span className="text-xs font-medium px-2 py-1 rounded-full bg-white text-black">Läuft</span>;
         } else {
-            return <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-800 text-blue-200">Geplant</span>;
+            return <span className="text-xs font-medium px-2 py-1 rounded-full bg-zinc-800 text-white">Geplant</span>;
         }
     };
 
@@ -309,7 +337,11 @@ function GamesPageContent() {
                                                     {new Date(game.created_at).toLocaleDateString()}
                                                 </div>
                                                 <div>
-                                                    {renderStatus(game.status)}
+                                                    {game.scores && game.scores.length > 0 && game.status !== 'completed' ? (
+                                                        <span className="text-xs font-medium px-2 py-1 rounded-full bg-white text-black">Läuft</span>
+                                                    ) : (
+                                                        renderStatus(game.status)
+                                                    )}
                                                 </div>
                                             </div>
 
@@ -399,7 +431,11 @@ function GamesPageContent() {
                                                         </span>
                                                     </td>
                                                     <td className="py-3 px-4">
-                                                        {renderStatus(game.status)}
+                                                        {game.scores && game.scores.length > 0 && game.status !== 'completed' ? (
+                                                            <span className="text-xs font-medium px-2 py-1 rounded-full bg-white text-black">Läuft</span>
+                                                        ) : (
+                                                            renderStatus(game.status)
+                                                        )}
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         {new Date(game.created_at).toLocaleDateString()}
