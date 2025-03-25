@@ -193,12 +193,11 @@ export async function signInWithMagicLink(email) {
 // Funktion zum Anmelden mit Zugangscode
 export async function signInWithAccessCode(email, accessCode) {
     try {
-        console.log("Anmeldung versuchen für:", email);
+        console.log("Starte Anmeldeprozess...");
 
-        // Prüfe zuerst, ob der Zugangscode korrekt ist
+        // Prüfe den globalen Zugangscode
         const globalAccessCode = process.env.NEXT_PUBLIC_GLOBAL_ACCESS_CODE;
 
-        // Wenn der eingegebene Code nicht mit dem globalen Code übereinstimmt, gib einen Fehler zurück
         if (!globalAccessCode) {
             console.error("Globaler Zugangscode ist nicht konfiguriert");
             return {
@@ -207,76 +206,67 @@ export async function signInWithAccessCode(email, accessCode) {
             };
         }
 
-        console.log("Prüfe Zugangscode...");
         if (accessCode !== globalAccessCode) {
-            console.error("Falscher Zugangscode eingegeben:", accessCode);
+            console.error("Falscher Zugangscode eingegeben");
             return {
                 data: null,
-                error: { message: 'Der Zugangscode ist nicht korrekt.' }
+                error: { message: 'Zugangscode ist nicht korrekt' }
             };
         }
 
-        // Wenn der Code korrekt ist, versuche den Benutzer zu authentifizieren
-        try {
-            console.log("Zugangscode korrekt, versuche Anmeldung bei Supabase...");
+        // Versuche den Benutzer anzumelden
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password: accessCode
+        });
 
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email,
-                password: accessCode // Wir verwenden den gleichen Code als Passwort
-            });
+        if (authError) {
+            console.error("Auth-Fehler:", authError);
 
-            if (error) {
-                console.error("Login-Fehler:", JSON.stringify(error));
-
-                // Wenn der Benutzer nicht existiert
-                if (error.message && (
-                    error.message.includes('Invalid login credentials') ||
-                    error.message.includes('User not found')
-                )) {
-                    console.log("Benutzer nicht gefunden, leite zur Registrierung weiter...");
-                    return {
-                        data: null,
-                        error: { message: 'Benutzer nicht gefunden. Bitte registrieren Sie sich.' }
-                    };
-                }
-
+            // Spezifische Fehlerbehandlung
+            if (authError.message?.includes('Invalid login credentials') ||
+                authError.message?.includes('User not found')) {
                 return {
                     data: null,
                     error: {
-                        message: error.message || 'Anmeldung fehlgeschlagen',
-                        status: error.status,
-                        name: error.name
+                        message: 'Benutzer nicht gefunden',
+                        status: 404,
+                        name: 'UserNotFound'
                     }
                 };
             }
 
-            if (!data || !data.user) {
-                console.error("Login fehlgeschlagen: Keine Benutzerdaten zurückgegeben");
-                return {
-                    data: null,
-                    error: { message: 'Anmeldung fehlgeschlagen' }
-                };
-            }
-
-            console.log("Anmeldung erfolgreich, Benutzer-ID:", data.user.id);
-            return { data, error: null };
-        } catch (authError) {
-            console.error("Authentifizierungsfehler:", authError);
             return {
                 data: null,
                 error: {
-                    message: authError.message || 'Fehler bei der Authentifizierung',
+                    message: authError.message || 'Anmeldung fehlgeschlagen',
+                    status: authError.status,
                     name: authError.name
                 }
             };
         }
+
+        if (!authData?.user) {
+            return {
+                data: null,
+                error: { message: 'Keine Benutzerdaten erhalten' }
+            };
+        }
+
+        // Erfolgreiche Anmeldung
+        console.log("Anmeldung erfolgreich:", authData.user.id);
+        return {
+            data: authData,
+            error: null
+        };
+
     } catch (error) {
         console.error("Unerwarteter Fehler bei der Anmeldung:", error);
         return {
             data: null,
             error: {
-                message: error.message || 'Unerwarteter Fehler bei der Anmeldung',
-                name: error.name
+                message: 'Ein unerwarteter Fehler ist aufgetreten',
+                originalError: error
             }
         };
     }
@@ -616,19 +606,29 @@ async function fetchProfileData(userId) {
 
     while (attempt < maxAttempts) {
         try {
+            // Erstelle ein Promise mit Timeout
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout')), CACHE_CONFIG.TIMEOUT)
+            );
+
+            // Führe die Datenbankabfragen parallel aus
             const [profileResult, playerResult] = await Promise.all([
-                supabase
-                    .from('profiles')
-                    .select('id, role')
-                    .eq('id', userId)
-                    .single()
-                    .timeout(CACHE_CONFIG.TIMEOUT),
-                supabase
-                    .from('players')
-                    .select('id, name, email')
-                    .eq('id', userId)
-                    .single()
-                    .timeout(CACHE_CONFIG.TIMEOUT)
+                Promise.race([
+                    supabase
+                        .from('profiles')
+                        .select('id, role')
+                        .eq('id', userId)
+                        .single(),
+                    timeoutPromise
+                ]),
+                Promise.race([
+                    supabase
+                        .from('players')
+                        .select('id, name, email')
+                        .eq('id', userId)
+                        .single(),
+                    timeoutPromise
+                ])
             ]);
 
             if (profileResult.error) throw profileResult.error;
@@ -864,4 +864,59 @@ export const getDailyRankings = async (date, useCache = true, limit = 50) => {
         console.error(`Fehler beim Laden des Rankings für ${date} (nach Wiederholungen):`, error);
         return { data: null, error };
     }
-}; 
+};
+
+// Funktion zum Aktualisieren des Benutzerprofils
+export async function updateProfile(userId, updates) {
+    try {
+        // Aktualisiere die players-Tabelle, wenn name oder email geändert wurden
+        if (updates.name || updates.email) {
+            const playerUpdates = {};
+            if (updates.name) playerUpdates.name = updates.name;
+            if (updates.email) playerUpdates.email = updates.email;
+
+            const { error: playerError } = await supabase
+                .from('players')
+                .update(playerUpdates)
+                .eq('id', userId);
+
+            if (playerError) {
+                console.error('Fehler beim Aktualisieren des Spielers:', playerError);
+                return { error: playerError };
+            }
+        }
+
+        // Aktualisiere die profiles-Tabelle
+        const profileUpdates = { ...updates };
+        delete profileUpdates.name; // Entferne Felder, die nicht zur profiles-Tabelle gehören
+        delete profileUpdates.email;
+
+        if (Object.keys(profileUpdates).length > 0) {
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .update(profileUpdates)
+                .eq('id', userId);
+
+            if (profileError) {
+                console.error('Fehler beim Aktualisieren des Profils:', profileError);
+                return { error: profileError };
+            }
+        }
+
+        // Invalidiere den Cache für diesen Benutzer
+        invalidateCache('profiles');
+
+        // Hole das aktualisierte Profil
+        const { data: updatedProfile, error: fetchError } = await getProfile(userId);
+
+        if (fetchError) {
+            console.error('Fehler beim Abrufen des aktualisierten Profils:', fetchError);
+            return { error: fetchError };
+        }
+
+        return { data: updatedProfile, error: null };
+    } catch (error) {
+        console.error('Unerwarteter Fehler beim Aktualisieren des Profils:', error);
+        return { error };
+    }
+} 

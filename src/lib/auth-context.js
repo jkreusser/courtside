@@ -20,112 +20,88 @@ export function AuthProvider({ children }) {
     const RETRY_DELAY = 1000;
     const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 Minuten
 
-    // Verbesserte Cache-Initialisierung mit iOS-Lesezeichen-Erkennung
+    // Verbesserte Cache-Initialisierung
     useEffect(() => {
-        const isPWA = window.matchMedia('(display-mode: standalone)').matches;
-        const isIOSHomeScreen = window.navigator.standalone;
-
         try {
             const cachedAuth = localStorage.getItem(AUTH_CACHE_KEY);
             if (cachedAuth) {
-                const { user: cachedUser, isAdmin: cachedAdmin, timestamp } = JSON.parse(cachedAuth);
-                // Längere Cache-Dauer für PWA/iOS-Lesezeichen
-                const maxAge = (isPWA || isIOSHomeScreen) ? 12 * 3600000 : 3600000; // 12 Stunden für PWA
-                if (cachedUser && Date.now() - timestamp < maxAge) {
+                const { user: cachedUser, timestamp } = JSON.parse(cachedAuth);
+                if (Date.now() - timestamp < SESSION_TIMEOUT) {
                     setUser(cachedUser);
-                    setAdminStatus(cachedAdmin);
-                    // Aktualisiere im Hintergrund
-                    setTimeout(() => {
-                        supabase.auth.getSession().then(({ data: { session } }) => {
-                            if (session?.user) {
-                                fetchUserWithRetry(session, true);
-                            }
-                        });
-                    }, 0);
-                } else {
-                    localStorage.removeItem(AUTH_CACHE_KEY);
                 }
             }
         } catch (e) {
-            console.error('Fehler beim Lesen des Auth-Caches:', e);
-            localStorage.removeItem(AUTH_CACHE_KEY);
+            console.error('Fehler beim Laden des Auth-Caches:', e);
         }
     }, []);
 
-    // Verbesserte Benutzerabruf-Funktion mit iOS-Optimierung
+    // Verbesserte Benutzerabfrage mit Retry-Logik
     const fetchUserWithRetry = async (session, force = false) => {
+        if (!session?.user?.id) return null;
+
         try {
-            const isPWA = window.matchMedia('(display-mode: standalone)').matches;
-            const isIOSHomeScreen = window.navigator.standalone;
+            const { data: userData, error: userError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', session.user.id)
+                .single();
 
-            // Wenn nicht erzwungen und der Benutzer bereits geladen ist
-            if (!force && user && user.id === session.user.id) {
-                // Prüfe auf Session-Timeout nur für PWA/iOS
-                if (isPWA || isIOSHomeScreen) {
-                    const timeSinceLastActive = Date.now() - lastActiveTimestamp;
-                    if (timeSinceLastActive < SESSION_TIMEOUT) {
-                        return true;
-                    }
-                } else {
-                    return true;
-                }
+            if (userError) {
+                throw userError;
             }
 
-            // Versuche die Session zu aktualisieren
-            const { data: refreshedSession, error: refreshError } = await supabase.auth.refreshSession();
-            if (refreshError) {
-                console.warn('Session-Aktualisierung fehlgeschlagen:', refreshError);
-                // Versuche trotzdem fortzufahren
-            }
+            // Prüfe Admin-Status
+            const isAdminUser = await isAdmin(session.user.id);
+            setAdminStatus(isAdminUser);
 
-            const admin = await isAdmin(session.user.id);
-            setUser(refreshedSession?.session?.user || session.user);
-            setAdminStatus(admin);
-            setRetryCount(0);
-            setLastActiveTimestamp(Date.now());
-
+            // Aktualisiere Cache
             try {
                 localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify({
-                    user: refreshedSession?.session?.user || session.user,
-                    isAdmin: admin,
+                    user: session.user,
                     timestamp: Date.now()
                 }));
             } catch (e) {
                 console.error('Fehler beim Speichern des Auth-Caches:', e);
             }
-            return true;
+
+            setUser(session.user);
+            setLastActiveTimestamp(Date.now());
+            return session.user;
         } catch (error) {
-            console.error('Fehler beim Abrufen des Benutzerstatus:', error);
+            console.error('Fehler beim Laden des Benutzerprofils:', error);
+
             if (retryCount < MAX_RETRIES) {
                 setRetryCount(prev => prev + 1);
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, retryCount)));
                 return fetchUserWithRetry(session, force);
             }
-            return false;
+
+            return null;
         }
     };
 
-    // Verbesserte Session-Wiederherstellung
+    // Verbesserte Session-Überwachung
     useEffect(() => {
         let mounted = true;
         let sessionCheckInterval;
 
-        const getUser = async () => {
+        // Initialisiere die Auth-Überwachung
+        const initializeAuth = async () => {
             try {
-                const { data: { session } } = await supabase.auth.getSession();
+                const { data: { session }, error } = await supabase.auth.getSession();
 
-                if (session?.user && mounted) {
+                if (error) throw error;
+
+                if (session?.user) {
                     await fetchUserWithRetry(session);
-                } else if (mounted) {
-                    try {
-                        localStorage.removeItem(AUTH_CACHE_KEY);
-                    } catch (e) {
-                        console.error('Fehler beim Löschen des Auth-Caches:', e);
-                    }
+                }
+
+                if (mounted) {
+                    setLoading(false);
+                    setInitialized(true);
                 }
             } catch (error) {
-                console.error('Fehler beim Abrufen des Benutzers:', error);
-            } finally {
+                console.error('Fehler bei der Auth-Initialisierung:', error);
                 if (mounted) {
                     setLoading(false);
                     setInitialized(true);
@@ -133,27 +109,22 @@ export function AuthProvider({ children }) {
             }
         };
 
-        getUser();
+        initializeAuth();
 
-        // Regelmäßige Session-Überprüfung
-        if (typeof window !== 'undefined') {
-            sessionCheckInterval = setInterval(() => {
-                const isPWA = window.matchMedia('(display-mode: standalone)').matches;
-                const isIOSHomeScreen = window.navigator.standalone;
+        // Session-Überprüfungsintervall
+        sessionCheckInterval = setInterval(() => {
+            const now = Date.now();
+            if (now - lastActiveTimestamp > SESSION_TIMEOUT) {
+                supabase.auth.refreshSession();
+            }
+        }, 60000); // Prüfe jede Minute
 
-                if (isPWA || isIOSHomeScreen) {
-                    supabase.auth.getSession().then(({ data: { session } }) => {
-                        if (session?.user) {
-                            fetchUserWithRetry(session, true);
-                        }
-                    });
-                }
-            }, 60000); // Alle 60 Sekunden
-        }
-
+        // Auth-Statusänderungen überwachen
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (event, session) => {
                 if (!mounted) return;
+
+                console.log('Auth-Event:', event);
 
                 if (session?.user) {
                     await fetchUserWithRetry(session);
@@ -166,17 +137,30 @@ export function AuthProvider({ children }) {
                         console.error('Fehler beim Löschen des Auth-Caches:', e);
                     }
                 }
-                setLoading(false);
-                setInitialized(true);
+
+                if (mounted) {
+                    setLoading(false);
+                    setInitialized(true);
+                }
             }
         );
+
+        // Aktivitätsüberwachung
+        const handleActivity = () => {
+            setLastActiveTimestamp(Date.now());
+        };
+
+        window.addEventListener('mousemove', handleActivity);
+        window.addEventListener('keydown', handleActivity);
+        window.addEventListener('touchstart', handleActivity);
 
         return () => {
             mounted = false;
             subscription.unsubscribe();
-            if (sessionCheckInterval) {
-                clearInterval(sessionCheckInterval);
-            }
+            clearInterval(sessionCheckInterval);
+            window.removeEventListener('mousemove', handleActivity);
+            window.removeEventListener('keydown', handleActivity);
+            window.removeEventListener('touchstart', handleActivity);
         };
     }, [retryCount]);
 
