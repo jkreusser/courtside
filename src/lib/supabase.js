@@ -9,7 +9,42 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true
+        detectSessionInUrl: true,
+        storageKey: 'courtside_auth_storage',
+        storage: {
+            getItem: (key) => {
+                try {
+                    const value = localStorage.getItem(key);
+                    if (!value) return null;
+                    // Versuche die Session wiederherzustellen, wenn die App aus dem Hintergrund kommt
+                    if (typeof window !== 'undefined' && document.visibilityState === 'visible') {
+                        const session = JSON.parse(value);
+                        if (session?.expires_at && new Date(session.expires_at * 1000) < new Date()) {
+                            localStorage.removeItem(key);
+                            return null;
+                        }
+                    }
+                    return value;
+                } catch (error) {
+                    console.error('Fehler beim Lesen der Session:', error);
+                    return null;
+                }
+            },
+            setItem: (key, value) => {
+                try {
+                    localStorage.setItem(key, value);
+                } catch (error) {
+                    console.error('Fehler beim Speichern der Session:', error);
+                }
+            },
+            removeItem: (key) => {
+                try {
+                    localStorage.removeItem(key);
+                } catch (error) {
+                    console.error('Fehler beim Entfernen der Session:', error);
+                }
+            }
+        }
     },
     realtime: {
         params: {
@@ -598,9 +633,28 @@ async function fetchProfileData(userId) {
 
 // Cache-Invalidierung
 export const invalidateCache = (key = null) => {
+    // Invalidiere den Cache-Manager
     cacheManager.clear(key);
+
+    // Invalidiere den Query-Cache
+    if (key === 'players' || key === null) {
+        queryCache.players.data = null;
+        queryCache.players.timestamp = 0;
+        queryCache.players.version++;
+    }
+    if (key === 'rankings' || key === null) {
+        queryCache.rankings.data = null;
+        queryCache.rankings.timestamp = 0;
+        queryCache.rankings.version++;
+    }
+    if (key === 'dailyRankings' || key === null) {
+        queryCache.dailyRankings.data = {};
+        queryCache.dailyRankings.timestamp = {};
+        queryCache.dailyRankings.version++;
+    }
 };
 
+// Benutzerrolle abrufen
 export const getUserRole = async (userId) => {
     const { data, error } = await supabase
         .from('profiles')
@@ -611,6 +665,7 @@ export const getUserRole = async (userId) => {
     return { data, error };
 };
 
+// Admin-Status prüfen
 export const isAdmin = async (userId) => {
     const { data, error } = await getUserRole(userId);
     return data?.role === 'admin';
@@ -773,58 +828,4 @@ export const getDailyRankings = async (date, useCache = true, limit = 50) => {
         console.error(`Fehler beim Laden des Rankings für ${date} (nach Wiederholungen):`, error);
         return { data: null, error };
     }
-};
-
-// Cache invalidieren bei Aktualisierung der Daten
-export const invalidateCache = (key = null) => {
-    if (key === 'players' || key === null) {
-        queryCache.players.data = null;
-        queryCache.players.timestamp = 0;
-        queryCache.players.version++;
-    }
-    if (key === 'rankings' || key === null) {
-        queryCache.rankings.data = null;
-        queryCache.rankings.timestamp = 0;
-        queryCache.rankings.version++;
-    }
-    if (key === 'dailyRankings' || key === null) {
-        queryCache.dailyRankings.data = {};
-        queryCache.dailyRankings.timestamp = {};
-        queryCache.dailyRankings.version++;
-    }
-    if (key === 'profile' || key === null) {
-        profileCache.data = {};
-        profileCache.timestamp = {};
-        profileCache.version++;
-    }
-};
-
-export const getUserRole = async (userId) => {
-    const { data, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-
-    return { data, error };
-};
-
-export const isAdmin = async (userId) => {
-    const { data, error } = await getUserRole(userId);
-    return data?.role === 'admin';
-};
-
-// Funktion zum Aktualisieren des Zugangscodes (für Admin)
-export async function updateAccessCode(userId, newAccessCode) {
-    try {
-        const { data, error } = await supabase.auth.admin.updateUserById(
-            userId,
-            { password: newAccessCode }
-        );
-
-        if (error) throw error;
-        return { data, error: null };
-    } catch (error) {
-        return { data: null, error };
-    }
-} 
+}; 

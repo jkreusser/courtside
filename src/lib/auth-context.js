@@ -39,8 +39,13 @@ export function AuthProvider({ children }) {
     }, []);
 
     // Verbesserte Benutzerabruf-Funktion mit Retry-Logik
-    const fetchUserWithRetry = async (session) => {
+    const fetchUserWithRetry = async (session, force = false) => {
         try {
+            // Wenn nicht erzwungen und der Benutzer bereits geladen ist, überspringe
+            if (!force && user && user.id === session.user.id) {
+                return true;
+            }
+
             const admin = await isAdmin(session.user.id);
             setUser(session.user);
             setAdminStatus(admin);
@@ -61,11 +66,35 @@ export function AuthProvider({ children }) {
             if (retryCount < MAX_RETRIES) {
                 setRetryCount(prev => prev + 1);
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, retryCount)));
-                return fetchUserWithRetry(session);
+                return fetchUserWithRetry(session, force);
             }
             return false;
         }
     };
+
+    // Visibility Change Handler
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+
+        const handleVisibilityChange = async () => {
+            if (document.visibilityState === 'visible') {
+                try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (session?.user) {
+                        // Force-Update der Session
+                        await fetchUserWithRetry(session, true);
+                    }
+                } catch (error) {
+                    console.error('Fehler beim Wiederherstellen der Session:', error);
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, []);
 
     useEffect(() => {
         let mounted = true;
