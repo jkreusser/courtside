@@ -147,7 +147,7 @@ export default function RootLayout({ children }) {
                 </div>
               </div>
             </main>
-            <footer className="bg-zinc-950 border-t border-zinc-800 py-4 sm:py-6 pb-20 md:pb-6 relative z-10">
+            <footer className="bg-zinc-950 border-t border-zinc-800 py-4 sm:py-6 relative z-0">
               <div className="container mx-auto px-4 text-sm text-zinc-400">
                 <div className="flex justify-between items-center">
                   <div>&copy; 2025 CourtSide</div>

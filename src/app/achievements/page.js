@@ -249,7 +249,7 @@ export default function AchievementsPage() {
                     {achievements.map((achievement) => (
                         <Card
                             key={achievement.id}
-                            className={`overflow-hidden border-2 transition-all duration-300 ${achievement.achieved
+                            className={`overflow-hidden border-2 ${achievement.achieved
                                 ? 'border-primary ' + achievement.backgroundColor
                                 : 'border-zinc-700 bg-zinc-900 opacity-75'
                                 }`}
