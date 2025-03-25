@@ -4,8 +4,31 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
-// Erstelle den Supabase-Client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Verbesserte Supabase-Client-Konfiguration
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+    },
+    realtime: {
+        params: {
+            eventsPerSecond: 2
+        }
+    },
+    db: {
+        schema: 'public'
+    },
+    global: {
+        headers: {
+            'x-application-name': 'courtside-pwa'
+        },
+        // Erhöhe Timeouts für instabile Verbindungen
+        fetchOptions: {
+            timeout: 20000 // 20 Sekunden
+        }
+    }
+});
 
 // Für Admin-Operationen die RLS umgehen
 export const supabaseAdmin = typeof window === 'undefined' && process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -13,6 +36,68 @@ export const supabaseAdmin = typeof window === 'undefined' && process.env.SUPABA
         auth: { autoRefreshToken: false, persistSession: false }
     })
     : supabase; // Im Browser oder wenn der Service Role Key nicht verfügbar ist, falle auf normale Rechte zurück
+
+// Verbesserte Cache-Konfiguration
+const CACHE_CONFIG = {
+    DEFAULT_DURATION: 5 * 60 * 1000, // 5 Minuten
+    EXTENDED_DURATION: 30 * 60 * 1000, // 30 Minuten für PWA
+    STALE_WHILE_REVALIDATE: 60 * 60 * 1000, // 1 Stunde
+    MAX_RETRIES: 3,
+    RETRY_DELAY: 1000,
+    TIMEOUT: 10000 // 10 Sekunden
+};
+
+// Verbesserte Cache-Struktur
+const cache = {
+    profiles: new Map(),
+    rankings: new Map(),
+    players: new Map(),
+    timestamp: new Map(),
+    version: 0
+};
+
+// Hilfsfunktion für Cache-Management
+const cacheManager = {
+    get: (key, userId = null) => {
+        const cacheKey = userId ? `${key}_${userId}` : key;
+        const data = cache[key].get(cacheKey);
+        const timestamp = cache.timestamp.get(cacheKey);
+
+        if (!data || !timestamp) return null;
+
+        const isPWA = typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches;
+        const maxAge = isPWA ? CACHE_CONFIG.EXTENDED_DURATION : CACHE_CONFIG.DEFAULT_DURATION;
+
+        if (Date.now() - timestamp < maxAge) {
+            return { data, fresh: true };
+        }
+
+        if (Date.now() - timestamp < CACHE_CONFIG.STALE_WHILE_REVALIDATE) {
+            return { data, fresh: false };
+        }
+
+        return null;
+    },
+
+    set: (key, data, userId = null) => {
+        const cacheKey = userId ? `${key}_${userId}` : key;
+        cache[key].set(cacheKey, data);
+        cache.timestamp.set(cacheKey, Date.now());
+        cache.version++;
+    },
+
+    clear: (key = null) => {
+        if (key) {
+            cache[key].clear();
+            cache.version++;
+        } else {
+            Object.keys(cache).forEach(k => {
+                if (k !== 'version') cache[k].clear();
+            });
+            cache.version++;
+        }
+    }
+};
 
 // Funktion zum Anmelden mit Magic Link
 export async function signInWithMagicLink(email) {
@@ -436,98 +521,111 @@ export const getCurrentUser = async () => {
     return user;
 };
 
-// Cache für Profile-Daten hinzufügen
-const profileCache = {
-    data: {},
-    timestamp: {},
-    version: 0
-};
-
-// Funktion zum Aktualisieren des eigenen Profils
+// Verbesserte getProfile-Funktion
 export async function getProfile(userId) {
-    const CACHE_DURATION = 30 * 1000; // 30 Sekunden Cache
-    const MAX_RETRIES = 2; // Weniger Wiederholungsversuche
-    const RETRY_DELAY = 500; // Kürzere Verzögerung
-
-    // Prüfe Cache
-    if (profileCache.data[userId] &&
-        Date.now() - profileCache.timestamp[userId] < CACHE_DURATION) {
-        return { data: profileCache.data[userId], error: null };
+    // Prüfe zuerst den Cache
+    const cachedData = cacheManager.get('profiles', userId);
+    if (cachedData) {
+        // Wenn die Daten frisch sind, verwende sie direkt
+        if (cachedData.fresh) {
+            return { data: cachedData.data, error: null };
+        }
+        // Wenn die Daten veraltet sind, gib sie zurück aber aktualisiere im Hintergrund
+        setTimeout(() => fetchProfileData(userId), 0);
+        return { data: cachedData.data, error: null, stale: true };
     }
 
-    const fetchWithRetry = async (attempt = 0) => {
+    return fetchProfileData(userId);
+}
+
+// Separate Funktion für das tatsächliche Fetching
+async function fetchProfileData(userId) {
+    let attempt = 0;
+    const maxAttempts = CACHE_CONFIG.MAX_RETRIES;
+
+    while (attempt < maxAttempts) {
         try {
-            // Optimierte Abfrage mit weniger Feldern
             const [profileResult, playerResult] = await Promise.all([
                 supabase
                     .from('profiles')
                     .select('id, role')
                     .eq('id', userId)
                     .single()
-                    .timeout(3000), // Timeout nach 3 Sekunden
+                    .timeout(CACHE_CONFIG.TIMEOUT),
                 supabase
                     .from('players')
                     .select('id, name, email')
                     .eq('id', userId)
                     .single()
-                    .timeout(3000)
+                    .timeout(CACHE_CONFIG.TIMEOUT)
             ]);
 
-            // Überprüfe auf Fehler
             if (profileResult.error) throw profileResult.error;
 
-            // Kombiniere die Daten
             const combinedData = {
                 ...profileResult.data,
                 player: playerResult.error ? null : playerResult.data
             };
 
-            // Aktualisiere Cache
-            profileCache.data[userId] = combinedData;
-            profileCache.timestamp[userId] = Date.now();
-            profileCache.version++;
+            // Speichere die erfolgreichen Daten im Cache
+            cacheManager.set('profiles', combinedData, userId);
 
             return { data: combinedData, error: null };
         } catch (error) {
-            console.error(`Fehler beim Abrufen des Profils (Versuch ${attempt + 1}/${MAX_RETRIES}):`, error);
+            console.error(`Fehler beim Abrufen des Profils (Versuch ${attempt + 1}/${maxAttempts}):`, error);
 
-            if (attempt < MAX_RETRIES - 1) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt)));
-                return fetchWithRetry(attempt + 1);
+            // Wenn es der letzte Versuch war, prüfe auf Cache-Daten
+            if (attempt === maxAttempts - 1) {
+                const cachedData = cacheManager.get('profiles', userId);
+                if (cachedData) {
+                    return {
+                        data: cachedData.data,
+                        error: null,
+                        stale: true
+                    };
+                }
+                return { data: null, error };
             }
 
-            // Bei Fehler versuche veraltete Cache-Daten zu verwenden
-            if (profileCache.data[userId]) {
-                console.log('Verwende veraltete Cache-Daten nach Fehler');
-                return {
-                    data: profileCache.data[userId],
-                    error: null,
-                    stale: true
-                };
-            }
-
-            return { data: null, error };
+            // Warte vor dem nächsten Versuch
+            await new Promise(resolve =>
+                setTimeout(resolve, CACHE_CONFIG.RETRY_DELAY * Math.pow(2, attempt))
+            );
+            attempt++;
         }
-    };
-
-    return fetchWithRetry();
+    }
 }
 
-// Funktion zum Aktualisieren des eigenen Profils
-export async function updateProfile(userId, updates) {
+// Cache-Invalidierung
+export const invalidateCache = (key = null) => {
+    cacheManager.clear(key);
+};
+
+export const getUserRole = async (userId) => {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .single();
+
+    return { data, error };
+};
+
+export const isAdmin = async (userId) => {
+    const { data, error } = await getUserRole(userId);
+    return data?.role === 'admin';
+};
+
+// Funktion zum Aktualisieren des Zugangscodes (für Admin)
+export async function updateAccessCode(userId, newAccessCode) {
     try {
-        // Aktualisiere den Spieler-Eintrag
-        const { error: playerError } = await supabase
-            .from('players')
-            .update({
-                name: updates.name,
-                // Weitere Spieler-Felder hier
-            })
-            .eq('id', userId);
+        const { data, error } = await supabase.auth.admin.updateUserById(
+            userId,
+            { password: newAccessCode }
+        );
 
-        if (playerError) throw playerError;
-
-        return { data: { success: true }, error: null };
+        if (error) throw error;
+        return { data, error: null };
     } catch (error) {
         return { data: null, error };
     }
