@@ -4,152 +4,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
-// Verbesserte Konfiguration
-const CACHE_CONFIG = {
-    TIMEOUT: 30000, // 30 Sekunden
-    MAX_RETRIES: 3,
-    RETRY_DELAY: 1000,
-    STALE_TIME: 5 * 60 * 1000, // 5 Minuten
-    DEFAULT_DURATION: 5 * 60 * 1000, // 5 Minuten
-    EXTENDED_DURATION: 30 * 60 * 1000, // 30 Minuten
-    STALE_WHILE_REVALIDATE: 10 * 60 * 1000 // 10 Minuten
-};
-
-// Verbesserte Cache-Struktur
-const cache = {
-    profiles: new Map(),
-    rankings: new Map(),
-    players: new Map(),
-    timestamp: new Map(),
-    version: 0
-};
-
-// Hilfsfunktion für Cache-Management
-const cacheManager = {
-    get: (key, userId = null) => {
-        const cacheKey = userId ? `${key}_${userId}` : key;
-        const data = cache[key].get(cacheKey);
-        const timestamp = cache.timestamp.get(cacheKey);
-
-        if (!data || !timestamp) return null;
-
-        const isPWA = typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches;
-        const maxAge = isPWA ? CACHE_CONFIG.EXTENDED_DURATION : CACHE_CONFIG.DEFAULT_DURATION;
-
-        if (Date.now() - timestamp < maxAge) {
-            return { data, fresh: true };
-        }
-
-        if (Date.now() - timestamp < CACHE_CONFIG.STALE_WHILE_REVALIDATE) {
-            return { data, fresh: false };
-        }
-
-        return null;
-    },
-
-    set: (key, data, userId = null) => {
-        const cacheKey = userId ? `${key}_${userId}` : key;
-        cache[key].set(cacheKey, data);
-        cache.timestamp.set(cacheKey, Date.now());
-        cache.version++;
-    },
-
-    clear: (key = null) => {
-        if (key) {
-            cache[key].clear();
-            cache.version++;
-        } else {
-            Object.keys(cache).forEach(k => {
-                if (k !== 'version') cache[k].clear();
-            });
-            cache.version++;
-        }
-    }
-};
-
-// Erstelle den Supabase-Client mit verbesserter Konfiguration
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-        storage: {
-            getItem: (key) => {
-                try {
-                    const storedSession = globalThis.localStorage?.getItem(key);
-                    return storedSession ? JSON.parse(storedSession) : null;
-                } catch (error) {
-                    console.warn('Fehler beim Laden der Session:', error);
-                    return null;
-                }
-            },
-            setItem: (key, value) => {
-                try {
-                    globalThis.localStorage?.setItem(key, JSON.stringify(value));
-                } catch (error) {
-                    console.warn('Fehler beim Speichern der Session:', error);
-                }
-            },
-            removeItem: (key) => {
-                try {
-                    globalThis.localStorage?.removeItem(key);
-                } catch (error) {
-                    console.warn('Fehler beim Entfernen der Session:', error);
-                }
-            },
-        },
-    },
-    realtime: {
-        params: {
-            eventsPerSecond: 2,
-        },
-        timeout: 30000, // 30 Sekunden Timeout für Realtime-Verbindungen
-        retryAfterError: true,
-        maxRetries: 3
-    },
-    global: {
-        headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        },
-        fetch: async (...args) => {
-            const fetchWithTimeout = async (resource, options = {}) => {
-                const controller = new AbortController();
-                const id = setTimeout(() => controller.abort(), 30000); // 30 Sekunden Timeout
-
-                const signal = options.signal || controller.signal;
-
-                try {
-                    const response = await fetch(resource, {
-                        ...options,
-                        signal,
-                        keepalive: true // Wichtig für iOS Background-Verhalten
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    return response;
-                } catch (error) {
-                    if (error.name === 'AbortError') {
-                        throw new Error('Netzwerk-Timeout - Bitte überprüfen Sie Ihre Verbindung');
-                    }
-                    throw error;
-                } finally {
-                    clearTimeout(id);
-                }
-            };
-
-            try {
-                return await fetchWithTimeout(...args);
-            } catch (error) {
-                console.error('Fetch-Fehler:', error);
-                throw error;
-            }
-        }
-    },
-});
+// Erstelle den Supabase-Client
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Für Admin-Operationen die RLS umgehen
 export const supabaseAdmin = typeof window === 'undefined' && process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -157,70 +13,6 @@ export const supabaseAdmin = typeof window === 'undefined' && process.env.SUPABA
         auth: { autoRefreshToken: false, persistSession: false }
     })
     : supabase; // Im Browser oder wenn der Service Role Key nicht verfügbar ist, falle auf normale Rechte zurück
-
-// Verbesserte Funktion für das Fetching von Profildaten
-async function fetchProfileData(userId) {
-    let attempt = 0;
-    const maxAttempts = CACHE_CONFIG.MAX_RETRIES;
-
-    while (attempt < maxAttempts) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), CACHE_CONFIG.TIMEOUT);
-
-            try {
-                // Führe die Datenbankabfragen parallel aus
-                const [profileResult, playerResult] = await Promise.all([
-                    supabase
-                        .from('profiles')
-                        .select('id, role')
-                        .eq('id', userId)
-                        .single()
-                        .abortSignal(controller.signal),
-                    supabase
-                        .from('players')
-                        .select('id, name, email')
-                        .eq('id', userId)
-                        .single()
-                        .abortSignal(controller.signal)
-                ]);
-
-                clearTimeout(timeoutId);
-
-                if (profileResult.error) throw profileResult.error;
-
-                const combinedData = {
-                    ...profileResult.data,
-                    player: playerResult.error ? null : playerResult.data
-                };
-
-                return { data: combinedData, error: null };
-            } finally {
-                clearTimeout(timeoutId);
-            }
-        } catch (error) {
-            attempt++;
-            console.warn(`Fehler beim Laden des Profils (Versuch ${attempt}/${maxAttempts}):`, error);
-
-            if (error.name === 'AbortError' || error.message.includes('Timeout')) {
-                if (attempt < maxAttempts) {
-                    // Exponentielles Backoff mit Jitter
-                    const delay = CACHE_CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1) * (0.5 + Math.random() * 0.5);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue;
-                }
-            }
-
-            // Bei anderen Fehlern oder wenn alle Versuche aufgebraucht sind
-            return { data: null, error };
-        }
-    }
-
-    return {
-        data: null,
-        error: new Error(`Maximale Anzahl von Versuchen (${maxAttempts}) erreicht`)
-    };
-}
 
 // Funktion zum Anmelden mit Magic Link
 export async function signInWithMagicLink(email) {
@@ -245,11 +37,12 @@ export async function signInWithMagicLink(email) {
 // Funktion zum Anmelden mit Zugangscode
 export async function signInWithAccessCode(email, accessCode) {
     try {
-        console.log("Starte Anmeldeprozess...");
+        console.log("Anmeldung versuchen für:", email);
 
-        // Prüfe den globalen Zugangscode
+        // Prüfe zuerst, ob der Zugangscode korrekt ist
         const globalAccessCode = process.env.NEXT_PUBLIC_GLOBAL_ACCESS_CODE;
 
+        // Wenn der eingegebene Code nicht mit dem globalen Code übereinstimmt, gib einen Fehler zurück
         if (!globalAccessCode) {
             console.error("Globaler Zugangscode ist nicht konfiguriert");
             return {
@@ -258,67 +51,76 @@ export async function signInWithAccessCode(email, accessCode) {
             };
         }
 
+        console.log("Prüfe Zugangscode...");
         if (accessCode !== globalAccessCode) {
-            console.error("Falscher Zugangscode eingegeben");
+            console.error("Falscher Zugangscode eingegeben:", accessCode);
             return {
                 data: null,
-                error: { message: 'Zugangscode ist nicht korrekt' }
+                error: { message: 'Der Zugangscode ist nicht korrekt.' }
             };
         }
 
-        // Versuche den Benutzer anzumelden
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email,
-            password: accessCode
-        });
+        // Wenn der Code korrekt ist, versuche den Benutzer zu authentifizieren
+        try {
+            console.log("Zugangscode korrekt, versuche Anmeldung bei Supabase...");
 
-        if (authError) {
-            console.error("Auth-Fehler:", authError);
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email,
+                password: accessCode // Wir verwenden den gleichen Code als Passwort
+            });
 
-            // Spezifische Fehlerbehandlung
-            if (authError.message?.includes('Invalid login credentials') ||
-                authError.message?.includes('User not found')) {
+            if (error) {
+                console.error("Login-Fehler:", JSON.stringify(error));
+
+                // Wenn der Benutzer nicht existiert
+                if (error.message && (
+                    error.message.includes('Invalid login credentials') ||
+                    error.message.includes('User not found')
+                )) {
+                    console.log("Benutzer nicht gefunden, leite zur Registrierung weiter...");
+                    return {
+                        data: null,
+                        error: { message: 'Benutzer nicht gefunden. Bitte registrieren Sie sich.' }
+                    };
+                }
+
                 return {
                     data: null,
                     error: {
-                        message: 'Benutzer nicht gefunden',
-                        status: 404,
-                        name: 'UserNotFound'
+                        message: error.message || 'Anmeldung fehlgeschlagen',
+                        status: error.status,
+                        name: error.name
                     }
                 };
             }
 
+            if (!data || !data.user) {
+                console.error("Login fehlgeschlagen: Keine Benutzerdaten zurückgegeben");
+                return {
+                    data: null,
+                    error: { message: 'Anmeldung fehlgeschlagen' }
+                };
+            }
+
+            console.log("Anmeldung erfolgreich, Benutzer-ID:", data.user.id);
+            return { data, error: null };
+        } catch (authError) {
+            console.error("Authentifizierungsfehler:", authError);
             return {
                 data: null,
                 error: {
-                    message: authError.message || 'Anmeldung fehlgeschlagen',
-                    status: authError.status,
+                    message: authError.message || 'Fehler bei der Authentifizierung',
                     name: authError.name
                 }
             };
         }
-
-        if (!authData?.user) {
-            return {
-                data: null,
-                error: { message: 'Keine Benutzerdaten erhalten' }
-            };
-        }
-
-        // Erfolgreiche Anmeldung
-        console.log("Anmeldung erfolgreich:", authData.user.id);
-        return {
-            data: authData,
-            error: null
-        };
-
     } catch (error) {
         console.error("Unerwarteter Fehler bei der Anmeldung:", error);
         return {
             data: null,
             error: {
-                message: 'Ein unerwarteter Fehler ist aufgetreten',
-                originalError: error
+                message: error.message || 'Unerwarteter Fehler bei der Anmeldung',
+                name: error.name
             }
         };
     }
@@ -634,73 +436,53 @@ export const getCurrentUser = async () => {
     return user;
 };
 
-// Verbesserte getProfile-Funktion
+// Funktion zum Aktualisieren des eigenen Profils
 export async function getProfile(userId) {
-    // Prüfe zuerst den Cache
-    const cachedData = cacheManager.get('profiles', userId);
-    if (cachedData) {
-        // Wenn die Daten frisch sind, verwende sie direkt
-        if (cachedData.fresh) {
-            return { data: cachedData.data, error: null };
-        }
-        // Wenn die Daten veraltet sind, gib sie zurück aber aktualisiere im Hintergrund
-        setTimeout(() => fetchProfileData(userId), 0);
-        return { data: cachedData.data, error: null, stale: true };
-    }
-
-    return fetchProfileData(userId);
-}
-
-// Cache-Invalidierung
-export const invalidateCache = (key = null) => {
-    // Invalidiere den Cache-Manager
-    cacheManager.clear(key);
-
-    // Invalidiere den Query-Cache
-    if (key === 'players' || key === null) {
-        queryCache.players.data = null;
-        queryCache.players.timestamp = 0;
-        queryCache.players.version++;
-    }
-    if (key === 'rankings' || key === null) {
-        queryCache.rankings.data = null;
-        queryCache.rankings.timestamp = 0;
-        queryCache.rankings.version++;
-    }
-    if (key === 'dailyRankings' || key === null) {
-        queryCache.dailyRankings.data = {};
-        queryCache.dailyRankings.timestamp = {};
-        queryCache.dailyRankings.version++;
-    }
-};
-
-// Benutzerrolle abrufen
-export const getUserRole = async (userId) => {
-    const { data, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-
-    return { data, error };
-};
-
-// Admin-Status prüfen
-export const isAdmin = async (userId) => {
-    const { data, error } = await getUserRole(userId);
-    return data?.role === 'admin';
-};
-
-// Funktion zum Aktualisieren des Zugangscodes (für Admin)
-export async function updateAccessCode(userId, newAccessCode) {
     try {
-        const { data, error } = await supabase.auth.admin.updateUserById(
-            userId,
-            { password: newAccessCode }
-        );
+        // Erst nur das Profil abrufen, ohne JOIN auf players
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
         if (error) throw error;
-        return { data, error: null };
+
+        // Versuche zusätzlich den players-Eintrag zu holen, falls vorhanden
+        const { data: playerData, error: playerError } = await supabase
+            .from('players')
+            .select('*')
+            .eq('id', userId)
+            .single();
+
+        // Kombiniere die Daten, wenn playerData existiert
+        const combinedData = {
+            ...data,
+            players: playerError ? null : playerData
+        };
+
+        return { data: combinedData, error: null };
+    } catch (error) {
+        console.error("Fehler beim Abrufen des Profils:", error);
+        return { data: null, error };
+    }
+}
+
+// Funktion zum Aktualisieren des eigenen Profils
+export async function updateProfile(userId, updates) {
+    try {
+        // Aktualisiere den Spieler-Eintrag
+        const { error: playerError } = await supabase
+            .from('players')
+            .update({
+                name: updates.name,
+                // Weitere Spieler-Felder hier
+            })
+            .eq('id', userId);
+
+        if (playerError) throw playerError;
+
+        return { data: { success: true }, error: null };
     } catch (error) {
         return { data: null, error };
     }
@@ -768,56 +550,33 @@ export const getPlayers = async (useCache = true) => {
 };
 
 export const getRankings = async (useCache = true, limit = 50) => {
-    const STALE_CACHE_TIME = 5 * 60 * 1000; // 5 Minuten
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 1000;
-
     // Prüfe Cache, wenn erlaubt
     if (useCache &&
         queryCache.rankings.data &&
-        Date.now() - queryCache.rankings.timestamp < STALE_CACHE_TIME) {
+        Date.now() - queryCache.rankings.timestamp < CACHE_DURATION) {
         return { data: queryCache.rankings.data, error: null };
     }
 
-    const fetchWithRetry = async (attempt = 0) => {
-        try {
-            const { data, error } = await supabase
+    try {
+        const result = await retryQuery(async () => {
+            return await supabase
                 .rpc('get_all_time_rankings')
                 .limit(limit);
+        });
 
-            if (error) throw error;
-
-            // Aktualisiere Cache nur bei erfolgreicher Abfrage
-            if (data) {
-                queryCache.rankings.data = data;
-                queryCache.rankings.timestamp = Date.now();
-                queryCache.rankings.version++;
-            }
-
-            return { data, error: null };
-        } catch (error) {
-            console.error(`Fehler beim Laden der Rangliste (Versuch ${attempt + 1}/${MAX_RETRIES}):`, error);
-
-            if (attempt < MAX_RETRIES - 1) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt)));
-                return fetchWithRetry(attempt + 1);
-            }
-
-            // Bei erschöpften Wiederholungsversuchen, prüfe ob wir einen veralteten Cache haben
-            if (queryCache.rankings.data) {
-                console.log('Verwende veraltete Cache-Daten nach fehlgeschlagenen Versuchen');
-                return {
-                    data: queryCache.rankings.data,
-                    error: null,
-                    stale: true
-                };
-            }
-
-            return { data: null, error };
+        // Aktualisiere Cache
+        if (result.data && !result.error) {
+            queryCache.rankings.data = result.data;
+            queryCache.rankings.timestamp = Date.now();
+            queryCache.rankings.version++;
         }
-    };
 
-    return fetchWithRetry();
+        return result;
+    } catch (error) {
+        // Keine Toast-Nachricht mehr hier
+        console.error('Fehler beim Laden der Rangliste (nach Wiederholungen):', error);
+        return { data: null, error };
+    }
 };
 
 export const getDailyRankings = async (date, useCache = true, limit = 50) => {
@@ -850,126 +609,51 @@ export const getDailyRankings = async (date, useCache = true, limit = 50) => {
     }
 };
 
-// Funktion zum Aktualisieren des Benutzerprofils
-export async function updateProfile(userId, updates) {
-    try {
-        // Aktualisiere die players-Tabelle, wenn name oder email geändert wurden
-        if (updates.name || updates.email) {
-            const playerUpdates = {};
-            if (updates.name) playerUpdates.name = updates.name;
-            if (updates.email) playerUpdates.email = updates.email;
-
-            const { error: playerError } = await supabase
-                .from('players')
-                .update(playerUpdates)
-                .eq('id', userId);
-
-            if (playerError) {
-                console.error('Fehler beim Aktualisieren des Spielers:', playerError);
-                return { error: playerError };
-            }
-        }
-
-        // Aktualisiere die profiles-Tabelle
-        const profileUpdates = { ...updates };
-        delete profileUpdates.name; // Entferne Felder, die nicht zur profiles-Tabelle gehören
-        delete profileUpdates.email;
-
-        if (Object.keys(profileUpdates).length > 0) {
-            const { error: profileError } = await supabase
-                .from('profiles')
-                .update(profileUpdates)
-                .eq('id', userId);
-
-            if (profileError) {
-                console.error('Fehler beim Aktualisieren des Profils:', profileError);
-                return { error: profileError };
-            }
-        }
-
-        // Invalidiere den Cache für diesen Benutzer
-        invalidateCache('profiles');
-
-        // Hole das aktualisierte Profil
-        const { data: updatedProfile, error: fetchError } = await getProfile(userId);
-
-        if (fetchError) {
-            console.error('Fehler beim Abrufen des aktualisierten Profils:', fetchError);
-            return { error: fetchError };
-        }
-
-        return { data: updatedProfile, error: null };
-    } catch (error) {
-        console.error('Unerwarteter Fehler beim Aktualisieren des Profils:', error);
-        return { error };
+// Cache invalidieren bei Aktualisierung der Daten
+export const invalidateCache = (key = null) => {
+    if (key === 'players' || key === null) {
+        queryCache.players.data = null;
+        queryCache.players.timestamp = 0;
+        queryCache.players.version++;
     }
-}
-
-// Verbesserte Wiederverbindungslogik
-export const reconnectSupabase = async () => {
-    try {
-        // Setze einen Timeout von 10 Sekunden für die gesamte Operation
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        try {
-            // Warte kurz, um dem System Zeit für die Netzwerkwiederherstellung zu geben
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            // 1. Prüfe und aktualisiere die Session
-            const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-            if (sessionError) {
-                console.warn('Session-Fehler beim Reconnect:', sessionError);
-                throw sessionError;
-            }
-
-            // Wenn keine Session existiert, beende früh
-            if (!session) {
-                console.log('Keine aktive Session gefunden beim Reconnect');
-                return { success: false, reason: 'no_session' };
-            }
-
-            // 2. Versuche die Session zu aktualisieren
-            const { error: refreshError } = await supabase.auth.refreshSession();
-            if (refreshError) {
-                console.warn('Session-Refresh fehlgeschlagen:', refreshError);
-                throw refreshError;
-            }
-
-            // 3. Teste die Datenbankverbindung mit einer einfachen Abfrage
-            const { error: testError } = await supabase
-                .from('profiles')
-                .select('count')
-                .limit(1)
-                .abortSignal(controller.signal);
-
-            if (testError) {
-                console.warn('Datenbank-Test fehlgeschlagen:', testError);
-                throw testError;
-            }
-
-            // 4. Invalidiere den Cache nach erfolgreicher Wiederverbindung
-            invalidateCache();
-
-            // 5. Trigger ein Auth State Change Event
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                // Manuell ein Auth-Event auslösen
-                await supabase.auth.refreshSession();
-            }
-
-            console.log('Reconnect erfolgreich durchgeführt');
-            return { success: true };
-        } finally {
-            clearTimeout(timeoutId);
-        }
-    } catch (error) {
-        console.error('Fehler bei der Wiederverbindung:', error);
-        return {
-            success: false,
-            reason: error.message || 'unknown_error',
-            error
-        };
+    if (key === 'rankings' || key === null) {
+        queryCache.rankings.data = null;
+        queryCache.rankings.timestamp = 0;
+        queryCache.rankings.version++;
     }
-}; 
+    if (key === 'dailyRankings' || key === null) {
+        queryCache.dailyRankings.data = {};
+        queryCache.dailyRankings.timestamp = {};
+        queryCache.dailyRankings.version++;
+    }
+};
+
+export const getUserRole = async (userId) => {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .single();
+
+    return { data, error };
+};
+
+export const isAdmin = async (userId) => {
+    const { data, error } = await getUserRole(userId);
+    return data?.role === 'admin';
+};
+
+// Funktion zum Aktualisieren des Zugangscodes (für Admin)
+export async function updateAccessCode(userId, newAccessCode) {
+    try {
+        const { data, error } = await supabase.auth.admin.updateUserById(
+            userId,
+            { password: newAccessCode }
+        );
+
+        if (error) throw error;
+        return { data, error: null };
+    } catch (error) {
+        return { data: null, error };
+    }
+} 
