@@ -4,118 +4,15 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
-// Verbesserte Supabase-Client-Konfiguration
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-        storageKey: 'courtside_auth_storage',
-        storage: {
-            getItem: (key) => {
-                try {
-                    const value = localStorage.getItem(key);
-                    if (!value) return null;
-
-                    const isPWA = typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches;
-                    const isIOSHomeScreen = typeof window !== 'undefined' && window.navigator.standalone;
-
-                    // Versuche die Session wiederherzustellen
-                    const session = JSON.parse(value);
-
-                    // Längere Session-Gültigkeit für PWA/iOS
-                    if ((isPWA || isIOSHomeScreen) && session?.expires_at) {
-                        // Verlängere die Ablaufzeit für PWA/iOS
-                        const extendedExpiresAt = new Date(session.expires_at * 1000);
-                        extendedExpiresAt.setHours(extendedExpiresAt.getHours() + 12);
-                        session.expires_at = Math.floor(extendedExpiresAt.getTime() / 1000);
-
-                        // Speichere die verlängerte Session
-                        try {
-                            localStorage.setItem(key, JSON.stringify(session));
-                        } catch (e) {
-                            console.error('Fehler beim Speichern der verlängerten Session:', e);
-                        }
-                    }
-
-                    // Prüfe Session-Gültigkeit
-                    if (session?.expires_at && new Date(session.expires_at * 1000) < new Date()) {
-                        localStorage.removeItem(key);
-                        return null;
-                    }
-
-                    return JSON.stringify(session);
-                } catch (error) {
-                    console.error('Fehler beim Lesen der Session:', error);
-                    return null;
-                }
-            },
-            setItem: (key, value) => {
-                try {
-                    const isPWA = typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches;
-                    const isIOSHomeScreen = typeof window !== 'undefined' && window.navigator.standalone;
-
-                    if (isPWA || isIOSHomeScreen) {
-                        // Verlängere die Session-Dauer für PWA/iOS
-                        const session = JSON.parse(value);
-                        if (session?.expires_at) {
-                            const extendedExpiresAt = new Date(session.expires_at * 1000);
-                            extendedExpiresAt.setHours(extendedExpiresAt.getHours() + 12);
-                            session.expires_at = Math.floor(extendedExpiresAt.getTime() / 1000);
-                            localStorage.setItem(key, JSON.stringify(session));
-                        } else {
-                            localStorage.setItem(key, value);
-                        }
-                    } else {
-                        localStorage.setItem(key, value);
-                    }
-                } catch (error) {
-                    console.error('Fehler beim Speichern der Session:', error);
-                }
-            },
-            removeItem: (key) => {
-                try {
-                    localStorage.removeItem(key);
-                } catch (error) {
-                    console.error('Fehler beim Entfernen der Session:', error);
-                }
-            }
-        }
-    },
-    realtime: {
-        params: {
-            eventsPerSecond: 2
-        }
-    },
-    db: {
-        schema: 'public'
-    },
-    global: {
-        headers: {
-            'x-application-name': 'courtside-pwa'
-        },
-        // Erhöhe Timeouts für instabile Verbindungen
-        fetchOptions: {
-            timeout: 30000 // 30 Sekunden für bessere iOS-Unterstützung
-        }
-    }
-});
-
-// Für Admin-Operationen die RLS umgehen
-export const supabaseAdmin = typeof window === 'undefined' && process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-        auth: { autoRefreshToken: false, persistSession: false }
-    })
-    : supabase; // Im Browser oder wenn der Service Role Key nicht verfügbar ist, falle auf normale Rechte zurück
-
-// Verbesserte Cache-Konfiguration
+// Verbesserte Konfiguration
 const CACHE_CONFIG = {
-    DEFAULT_DURATION: 5 * 60 * 1000, // 5 Minuten
-    EXTENDED_DURATION: 30 * 60 * 1000, // 30 Minuten für PWA
-    STALE_WHILE_REVALIDATE: 60 * 60 * 1000, // 1 Stunde
+    TIMEOUT: 30000, // 30 Sekunden
     MAX_RETRIES: 3,
     RETRY_DELAY: 1000,
-    TIMEOUT: 10000 // 10 Sekunden
+    STALE_TIME: 5 * 60 * 1000, // 5 Minuten
+    DEFAULT_DURATION: 5 * 60 * 1000, // 5 Minuten
+    EXTENDED_DURATION: 30 * 60 * 1000, // 30 Minuten
+    STALE_WHILE_REVALIDATE: 10 * 60 * 1000 // 10 Minuten
 };
 
 // Verbesserte Cache-Struktur
@@ -169,6 +66,161 @@ const cacheManager = {
         }
     }
 };
+
+// Erstelle den Supabase-Client mit verbesserter Konfiguration
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage: {
+            getItem: (key) => {
+                try {
+                    const storedSession = globalThis.localStorage?.getItem(key);
+                    return storedSession ? JSON.parse(storedSession) : null;
+                } catch (error) {
+                    console.warn('Fehler beim Laden der Session:', error);
+                    return null;
+                }
+            },
+            setItem: (key, value) => {
+                try {
+                    globalThis.localStorage?.setItem(key, JSON.stringify(value));
+                } catch (error) {
+                    console.warn('Fehler beim Speichern der Session:', error);
+                }
+            },
+            removeItem: (key) => {
+                try {
+                    globalThis.localStorage?.removeItem(key);
+                } catch (error) {
+                    console.warn('Fehler beim Entfernen der Session:', error);
+                }
+            },
+        },
+    },
+    realtime: {
+        params: {
+            eventsPerSecond: 2,
+        },
+        timeout: 30000, // 30 Sekunden Timeout für Realtime-Verbindungen
+        retryAfterError: true,
+        maxRetries: 3
+    },
+    global: {
+        headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+        },
+        fetch: async (...args) => {
+            const fetchWithTimeout = async (resource, options = {}) => {
+                const controller = new AbortController();
+                const id = setTimeout(() => controller.abort(), 30000); // 30 Sekunden Timeout
+
+                const signal = options.signal || controller.signal;
+
+                try {
+                    const response = await fetch(resource, {
+                        ...options,
+                        signal,
+                        keepalive: true // Wichtig für iOS Background-Verhalten
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    return response;
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        throw new Error('Netzwerk-Timeout - Bitte überprüfen Sie Ihre Verbindung');
+                    }
+                    throw error;
+                } finally {
+                    clearTimeout(id);
+                }
+            };
+
+            try {
+                return await fetchWithTimeout(...args);
+            } catch (error) {
+                console.error('Fetch-Fehler:', error);
+                throw error;
+            }
+        }
+    },
+});
+
+// Für Admin-Operationen die RLS umgehen
+export const supabaseAdmin = typeof window === 'undefined' && process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { autoRefreshToken: false, persistSession: false }
+    })
+    : supabase; // Im Browser oder wenn der Service Role Key nicht verfügbar ist, falle auf normale Rechte zurück
+
+// Verbesserte Funktion für das Fetching von Profildaten
+async function fetchProfileData(userId) {
+    let attempt = 0;
+    const maxAttempts = CACHE_CONFIG.MAX_RETRIES;
+
+    while (attempt < maxAttempts) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), CACHE_CONFIG.TIMEOUT);
+
+            try {
+                // Führe die Datenbankabfragen parallel aus
+                const [profileResult, playerResult] = await Promise.all([
+                    supabase
+                        .from('profiles')
+                        .select('id, role')
+                        .eq('id', userId)
+                        .single()
+                        .abortSignal(controller.signal),
+                    supabase
+                        .from('players')
+                        .select('id, name, email')
+                        .eq('id', userId)
+                        .single()
+                        .abortSignal(controller.signal)
+                ]);
+
+                clearTimeout(timeoutId);
+
+                if (profileResult.error) throw profileResult.error;
+
+                const combinedData = {
+                    ...profileResult.data,
+                    player: playerResult.error ? null : playerResult.data
+                };
+
+                return { data: combinedData, error: null };
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        } catch (error) {
+            attempt++;
+            console.warn(`Fehler beim Laden des Profils (Versuch ${attempt}/${maxAttempts}):`, error);
+
+            if (error.name === 'AbortError' || error.message.includes('Timeout')) {
+                if (attempt < maxAttempts) {
+                    // Exponentielles Backoff mit Jitter
+                    const delay = CACHE_CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1) * (0.5 + Math.random() * 0.5);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+            }
+
+            // Bei anderen Fehlern oder wenn alle Versuche aufgebraucht sind
+            return { data: null, error };
+        }
+    }
+
+    return {
+        data: null,
+        error: new Error(`Maximale Anzahl von Versuchen (${maxAttempts}) erreicht`)
+    };
+}
 
 // Funktion zum Anmelden mit Magic Link
 export async function signInWithMagicLink(email) {
@@ -599,74 +651,6 @@ export async function getProfile(userId) {
     return fetchProfileData(userId);
 }
 
-// Separate Funktion für das tatsächliche Fetching
-async function fetchProfileData(userId) {
-    let attempt = 0;
-    const maxAttempts = CACHE_CONFIG.MAX_RETRIES;
-
-    while (attempt < maxAttempts) {
-        try {
-            // Erstelle ein Promise mit Timeout
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout')), CACHE_CONFIG.TIMEOUT)
-            );
-
-            // Führe die Datenbankabfragen parallel aus
-            const [profileResult, playerResult] = await Promise.all([
-                Promise.race([
-                    supabase
-                        .from('profiles')
-                        .select('id, role')
-                        .eq('id', userId)
-                        .single(),
-                    timeoutPromise
-                ]),
-                Promise.race([
-                    supabase
-                        .from('players')
-                        .select('id, name, email')
-                        .eq('id', userId)
-                        .single(),
-                    timeoutPromise
-                ])
-            ]);
-
-            if (profileResult.error) throw profileResult.error;
-
-            const combinedData = {
-                ...profileResult.data,
-                player: playerResult.error ? null : playerResult.data
-            };
-
-            // Speichere die erfolgreichen Daten im Cache
-            cacheManager.set('profiles', combinedData, userId);
-
-            return { data: combinedData, error: null };
-        } catch (error) {
-            console.error(`Fehler beim Abrufen des Profils (Versuch ${attempt + 1}/${maxAttempts}):`, error);
-
-            // Wenn es der letzte Versuch war, prüfe auf Cache-Daten
-            if (attempt === maxAttempts - 1) {
-                const cachedData = cacheManager.get('profiles', userId);
-                if (cachedData) {
-                    return {
-                        data: cachedData.data,
-                        error: null,
-                        stale: true
-                    };
-                }
-                return { data: null, error };
-            }
-
-            // Warte vor dem nächsten Versuch
-            await new Promise(resolve =>
-                setTimeout(resolve, CACHE_CONFIG.RETRY_DELAY * Math.pow(2, attempt))
-            );
-            attempt++;
-        }
-    }
-}
-
 // Cache-Invalidierung
 export const invalidateCache = (key = null) => {
     // Invalidiere den Cache-Manager
@@ -919,4 +903,73 @@ export async function updateProfile(userId, updates) {
         console.error('Unerwarteter Fehler beim Aktualisieren des Profils:', error);
         return { error };
     }
-} 
+}
+
+// Verbesserte Wiederverbindungslogik
+export const reconnectSupabase = async () => {
+    try {
+        // Setze einen Timeout von 10 Sekunden für die gesamte Operation
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        try {
+            // Warte kurz, um dem System Zeit für die Netzwerkwiederherstellung zu geben
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // 1. Prüfe und aktualisiere die Session
+            const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+            if (sessionError) {
+                console.warn('Session-Fehler beim Reconnect:', sessionError);
+                throw sessionError;
+            }
+
+            // Wenn keine Session existiert, beende früh
+            if (!session) {
+                console.log('Keine aktive Session gefunden beim Reconnect');
+                return { success: false, reason: 'no_session' };
+            }
+
+            // 2. Versuche die Session zu aktualisieren
+            const { error: refreshError } = await supabase.auth.refreshSession();
+            if (refreshError) {
+                console.warn('Session-Refresh fehlgeschlagen:', refreshError);
+                throw refreshError;
+            }
+
+            // 3. Teste die Datenbankverbindung mit einer einfachen Abfrage
+            const { error: testError } = await supabase
+                .from('profiles')
+                .select('count')
+                .limit(1)
+                .abortSignal(controller.signal);
+
+            if (testError) {
+                console.warn('Datenbank-Test fehlgeschlagen:', testError);
+                throw testError;
+            }
+
+            // 4. Invalidiere den Cache nach erfolgreicher Wiederverbindung
+            invalidateCache();
+
+            // 5. Trigger ein Auth State Change Event
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                // Manuell ein Auth-Event auslösen
+                await supabase.auth.refreshSession();
+            }
+
+            console.log('Reconnect erfolgreich durchgeführt');
+            return { success: true };
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    } catch (error) {
+        console.error('Fehler bei der Wiederverbindung:', error);
+        return {
+            success: false,
+            reason: error.message || 'unknown_error',
+            error
+        };
+    }
+}; 

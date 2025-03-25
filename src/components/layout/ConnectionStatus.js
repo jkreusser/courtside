@@ -1,24 +1,44 @@
 'use client';
 
-import { useConnectionManager } from '@/lib/hooks/useConnectionManager';
+import { useAuth } from '@/lib/auth-context';
+import { useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
 
 export default function ConnectionStatus() {
-    const { isOnline, needsRefresh } = useConnectionManager();
+    const { connectionState, isOnline, needsRefresh, refreshData } = useAuth();
+    const [showOffline, setShowOffline] = useState(false);
+
+    useEffect(() => {
+        let timeoutId;
+
+        if (!isOnline) {
+            timeoutId = setTimeout(() => {
+                setShowOffline(true);
+                toast.error('Keine Verbindung zum Server', {
+                    id: 'connection-lost',
+                    duration: Infinity
+                });
+            }, 2000);
+        } else {
+            setShowOffline(false);
+            toast.dismiss('connection-lost');
+            if (needsRefresh) {
+                refreshData();
+            }
+        }
+
+        return () => {
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [isOnline, needsRefresh, refreshData]);
+
+    if (!showOffline) return null;
 
     return (
-        <>
-            {/* Offline-Indikator */}
-            {!isOnline && (
-                <div className="fixed top-0 left-0 right-0 bg-yellow-500 text-white p-2 text-center z-50">
-                    Offline-Modus - Einige Funktionen sind möglicherweise eingeschränkt
-                </div>
-            )}
-            {/* Aktualisierungs-Indikator */}
-            {needsRefresh && (
-                <div className="fixed top-0 left-0 right-0 bg-blue-500 text-white p-2 text-center z-50">
-                    Aktualisiere Daten...
-                </div>
-            )}
-        </>
+        <div className="fixed bottom-0 left-0 right-0 bg-red-500 text-white p-4 text-center z-50">
+            <p className="text-sm">
+                Keine Verbindung zum Server. Versuche wiederherzustellen...
+            </p>
+        </div>
     );
 } 
