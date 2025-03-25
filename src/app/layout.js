@@ -114,14 +114,14 @@ export default function RootLayout({ children }) {
             <div className="relative">
               <Header />
             </div>
-            <main className="flex-1 container mx-auto px-4 py-4 sm:py-8 mb-16 md:mb-0">
+            <main className="flex-1 container mx-auto px-4 py-4 sm:py-8">
               <div className="page-transition-wrapper">
                 <div className="page-content">
                   {children}
                 </div>
               </div>
             </main>
-            <footer className="bg-zinc-950 border-t border-zinc-800 py-4 sm:py-6">
+            <footer className="bg-zinc-950 border-t border-zinc-800 py-4 sm:py-6 pb-20 md:pb-6">
               <div className="container mx-auto px-4 text-sm text-zinc-400">
                 <div className="flex justify-between items-center">
                   <div>&copy; 2025 CourtSide</div>
