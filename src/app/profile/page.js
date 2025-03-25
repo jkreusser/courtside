@@ -40,8 +40,8 @@ export default function ProfilePage() {
 
                 setProfile(data);
                 setFormData({
-                    name: data.name || user.user_metadata?.name || '',
-                    email: data.email || user.email || '',
+                    name: data.player?.name || user.user_metadata?.name || '',
+                    email: data.player?.email || user.email || '',
                 });
             } catch (error) {
                 toast.error('Fehler beim Laden des Profils');

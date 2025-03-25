@@ -438,34 +438,48 @@ export const getCurrentUser = async () => {
 
 // Funktion zum Aktualisieren des eigenen Profils
 export async function getProfile(userId) {
-    try {
-        // Erst nur das Profil abrufen, ohne JOIN auf players
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', userId)
-            .single();
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000;
 
-        if (error) throw error;
+    const fetchWithRetry = async (attempt = 0) => {
+        try {
+            // Separate Abfragen für Profile und Player
+            const [profileResult, playerResult] = await Promise.all([
+                supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', userId)
+                    .single(),
+                supabase
+                    .from('players')
+                    .select('*')
+                    .eq('id', userId)
+                    .single()
+            ]);
 
-        // Versuche zusätzlich den players-Eintrag zu holen, falls vorhanden
-        const { data: playerData, error: playerError } = await supabase
-            .from('players')
-            .select('*')
-            .eq('id', userId)
-            .single();
+            // Überprüfe auf Fehler
+            if (profileResult.error) throw profileResult.error;
 
-        // Kombiniere die Daten, wenn playerData existiert
-        const combinedData = {
-            ...data,
-            players: playerError ? null : playerData
-        };
+            // Kombiniere die Daten
+            const combinedData = {
+                ...profileResult.data,
+                player: playerResult.error ? null : playerResult.data
+            };
 
-        return { data: combinedData, error: null };
-    } catch (error) {
-        console.error("Fehler beim Abrufen des Profils:", error);
-        return { data: null, error };
-    }
+            return { data: combinedData, error: null };
+        } catch (error) {
+            console.error(`Fehler beim Abrufen des Profils (Versuch ${attempt + 1}/${MAX_RETRIES}):`, error);
+
+            if (attempt < MAX_RETRIES - 1) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt)));
+                return fetchWithRetry(attempt + 1);
+            }
+
+            return { data: null, error };
+        }
+    };
+
+    return fetchWithRetry();
 }
 
 // Funktion zum Aktualisieren des eigenen Profils
@@ -550,33 +564,56 @@ export const getPlayers = async (useCache = true) => {
 };
 
 export const getRankings = async (useCache = true, limit = 50) => {
+    const STALE_CACHE_TIME = 5 * 60 * 1000; // 5 Minuten
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000;
+
     // Prüfe Cache, wenn erlaubt
     if (useCache &&
         queryCache.rankings.data &&
-        Date.now() - queryCache.rankings.timestamp < CACHE_DURATION) {
+        Date.now() - queryCache.rankings.timestamp < STALE_CACHE_TIME) {
         return { data: queryCache.rankings.data, error: null };
     }
 
-    try {
-        const result = await retryQuery(async () => {
-            return await supabase
+    const fetchWithRetry = async (attempt = 0) => {
+        try {
+            const { data, error } = await supabase
                 .rpc('get_all_time_rankings')
                 .limit(limit);
-        });
 
-        // Aktualisiere Cache
-        if (result.data && !result.error) {
-            queryCache.rankings.data = result.data;
-            queryCache.rankings.timestamp = Date.now();
-            queryCache.rankings.version++;
+            if (error) throw error;
+
+            // Aktualisiere Cache nur bei erfolgreicher Abfrage
+            if (data) {
+                queryCache.rankings.data = data;
+                queryCache.rankings.timestamp = Date.now();
+                queryCache.rankings.version++;
+            }
+
+            return { data, error: null };
+        } catch (error) {
+            console.error(`Fehler beim Laden der Rangliste (Versuch ${attempt + 1}/${MAX_RETRIES}):`, error);
+
+            if (attempt < MAX_RETRIES - 1) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt)));
+                return fetchWithRetry(attempt + 1);
+            }
+
+            // Bei erschöpften Wiederholungsversuchen, prüfe ob wir einen veralteten Cache haben
+            if (queryCache.rankings.data) {
+                console.log('Verwende veraltete Cache-Daten nach fehlgeschlagenen Versuchen');
+                return {
+                    data: queryCache.rankings.data,
+                    error: null,
+                    stale: true
+                };
+            }
+
+            return { data: null, error };
         }
+    };
 
-        return result;
-    } catch (error) {
-        // Keine Toast-Nachricht mehr hier
-        console.error('Fehler beim Laden der Rangliste (nach Wiederholungen):', error);
-        return { data: null, error };
-    }
+    return fetchWithRetry();
 };
 
 export const getDailyRankings = async (date, useCache = true, limit = 50) => {

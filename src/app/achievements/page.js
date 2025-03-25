@@ -123,128 +123,68 @@ export default function AchievementsPage() {
     // Lade Achievements für den aktuellen Benutzer oder zeige alle Achievements an
     useEffect(() => {
         let isMounted = true;
-        let retryTimeout;
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 1000;
 
-        const fetchAchievements = async () => {
+        const fetchAchievements = async (attempt = 0) => {
             if (!user) return;
 
             try {
                 setLoading(true);
                 setError(null);
 
-                if (user) {
-                    // Optimierte Abfrage mit spezifischer Feldauswahl
-                    const { data, error } = await supabase
-                        .from('player_achievements')
-                        .select('achievement_id, achieved_at')
-                        .eq('player_id', user.id)
-                        .throwOnError();
+                // Optimierte Abfrage mit spezifischer Feldauswahl
+                const { data, error } = await supabase
+                    .from('player_achievements')
+                    .select('achievement_id, achieved_at')
+                    .eq('player_id', user.id)
+                    .throwOnError();
 
-                    if (error) {
-                        throw error;
-                    }
+                if (error) throw error;
 
-                    if (isMounted) {
-                        setUserAchievements(data || []);
+                if (isMounted) {
+                    const userAchievementsData = data || [];
+                    setUserAchievements(userAchievementsData);
 
-                        // Kombiniere alle Achievements mit Benutzerstatus
-                        const achievementsWithStatus = allAchievements.map(achievement => {
-                            const userAchievement = data?.find(ua => ua.achievement_id === achievement.id);
-                            return {
-                                ...achievement,
-                                achieved: !!userAchievement,
-                                achievedAt: userAchievement?.achieved_at
-                            };
-                        });
+                    // Kombiniere alle Achievements mit Benutzerstatus
+                    const achievementsWithStatus = allAchievements.map(achievement => {
+                        const userAchievement = userAchievementsData.find(ua => ua.achievement_id === achievement.id);
+                        return {
+                            ...achievement,
+                            achieved: !!userAchievement,
+                            achievedAt: userAchievement?.achieved_at
+                        };
+                    });
 
-                        setAchievements(achievementsWithStatus);
+                    setAchievements(achievementsWithStatus);
 
-                        // Statistiken berechnen
-                        const achievedCount = achievementsWithStatus.filter(a => a.achieved).length;
-                        setStats({
-                            total: allAchievements.length,
-                            achieved: achievedCount
-                        });
-                    }
-                } else {
-                    // Wenn kein Benutzer angemeldet ist, zeige alle Achievements als nicht erreicht an
-                    const achievementsWithoutStatus = allAchievements.map(achievement => ({
-                        ...achievement,
-                        achieved: false
-                    }));
-
-                    if (isMounted) {
-                        setAchievements(achievementsWithoutStatus);
-                        setStats({
-                            total: allAchievements.length,
-                            achieved: 0
-                        });
-                    }
+                    // Statistiken berechnen
+                    const achievedCount = achievementsWithStatus.filter(a => a.achieved).length;
+                    setStats({
+                        total: allAchievements.length,
+                        achieved: achievedCount
+                    });
                 }
             } catch (error) {
-                console.error('Fehler beim Laden der Achievements:', error);
+                console.error(`Fehler beim Laden der Achievements (Versuch ${attempt + 1}/${MAX_RETRIES}):`, error);
+
+                if (attempt < MAX_RETRIES - 1 && isMounted) {
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, attempt)));
+                    return fetchAchievements(attempt + 1);
+                }
+
                 if (isMounted) {
                     setError('Fehler beim Laden der Achievements');
-                    toast.error('Fehler beim Laden der Achievements');
-
-                    // Wiederholungsversuch mit exponentieller Verzögerung
-                    let retryCount = 0;
-                    const maxRetries = 3;
-                    const retryWithBackoff = async () => {
-                        if (retryCount >= maxRetries || !isMounted) return;
-
-                        retryCount++;
-                        const delay = 1000 * Math.pow(2, retryCount - 1);
-                        console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
-
-                        await new Promise(resolve => setTimeout(resolve, delay));
-
-                        try {
-                            const { data: retryData, error: retryError } = await supabase
-                                .from('player_achievements')
-                                .select('achievement_id, achieved_at')
-                                .eq('player_id', user.id)
-                                .throwOnError();
-
-                            if (retryError) {
-                                throw retryError;
-                            }
-
-                            if (isMounted) {
-                                setUserAchievements(retryData || []);
-                                const achievementsWithStatus = allAchievements.map(achievement => {
-                                    const userAchievement = retryData?.find(ua => ua.achievement_id === achievement.id);
-                                    return {
-                                        ...achievement,
-                                        achieved: !!userAchievement,
-                                        achievedAt: userAchievement?.achieved_at
-                                    };
-                                });
-
-                                setAchievements(achievementsWithStatus);
-                                setStats({
-                                    total: allAchievements.length,
-                                    achieved: achievementsWithStatus.filter(a => a.achieved).length
-                                });
-                                return true;
-                            }
-                        } catch (retryError) {
-                            console.error('Fehler beim Wiederholungsversuch:', retryError);
-                        }
-
-                        if (retryCount < maxRetries && isMounted) {
-                            return retryWithBackoff();
-                        }
-
-                        return false;
-                    };
-
-                    const success = await retryWithBackoff();
-                    if (!success && isMounted) {
-                        retryTimeout = setTimeout(() => {
-                            router.refresh();
-                        }, 5000);
-                    }
+                    // Fallback: Zeige leere Liste mit Basis-Achievements
+                    setAchievements(allAchievements.map(achievement => ({
+                        ...achievement,
+                        achieved: false,
+                        achievedAt: null
+                    })));
+                    setStats({
+                        total: allAchievements.length,
+                        achieved: 0
+                    });
                 }
             } finally {
                 if (isMounted) {
@@ -259,11 +199,8 @@ export default function AchievementsPage() {
 
         return () => {
             isMounted = false;
-            if (retryTimeout) {
-                clearTimeout(retryTimeout);
-            }
         };
-    }, [user, authLoading, router, allAchievements]);
+    }, [user, authLoading, allAchievements]);
 
     // Fortschrittberechnung
     const progressPercentage = useMemo(() =>

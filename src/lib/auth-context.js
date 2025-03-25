@@ -14,48 +14,69 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true);
     const [adminStatus, setAdminStatus] = useState(false);
     const [initialized, setInitialized] = useState(false);
+    const [retryCount, setRetryCount] = useState(0);
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000;
 
-    // Versuche, den Cache zu nutzen, um Flackern zu reduzieren
+    // Verbesserte Cache-Initialisierung
     useEffect(() => {
         try {
-            // Versuche, den Benutzer aus dem lokalen Speicher zu laden
             const cachedAuth = localStorage.getItem(AUTH_CACHE_KEY);
             if (cachedAuth) {
-                const { user: cachedUser, isAdmin: cachedAdmin } = JSON.parse(cachedAuth);
-                if (cachedUser) {
+                const { user: cachedUser, isAdmin: cachedAdmin, timestamp } = JSON.parse(cachedAuth);
+                // Prüfe ob der Cache nicht älter als 1 Stunde ist
+                if (cachedUser && Date.now() - timestamp < 3600000) {
                     setUser(cachedUser);
                     setAdminStatus(cachedAdmin);
+                } else {
+                    localStorage.removeItem(AUTH_CACHE_KEY);
                 }
             }
         } catch (e) {
             console.error('Fehler beim Lesen des Auth-Caches:', e);
+            localStorage.removeItem(AUTH_CACHE_KEY);
         }
     }, []);
 
+    // Verbesserte Benutzerabruf-Funktion mit Retry-Logik
+    const fetchUserWithRetry = async (session) => {
+        try {
+            const admin = await isAdmin(session.user.id);
+            setUser(session.user);
+            setAdminStatus(admin);
+            setRetryCount(0);
+
+            try {
+                localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify({
+                    user: session.user,
+                    isAdmin: admin,
+                    timestamp: Date.now()
+                }));
+            } catch (e) {
+                console.error('Fehler beim Speichern des Auth-Caches:', e);
+            }
+            return true;
+        } catch (error) {
+            console.error('Fehler beim Abrufen des Benutzerstatus:', error);
+            if (retryCount < MAX_RETRIES) {
+                setRetryCount(prev => prev + 1);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, retryCount)));
+                return fetchUserWithRetry(session);
+            }
+            return false;
+        }
+    };
+
     useEffect(() => {
-        // Beim Laden der Komponente den aktuellen Benutzer abrufen
+        let mounted = true;
+
         const getUser = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
 
-                if (session?.user) {
-                    setUser(session.user);
-
-                    // Prüfen, ob der Benutzer Admin-Rechte hat
-                    const admin = await isAdmin(session.user.id);
-                    setAdminStatus(admin);
-
-                    // Cache aktualisieren
-                    try {
-                        localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify({
-                            user: session.user,
-                            isAdmin: admin
-                        }));
-                    } catch (e) {
-                        console.error('Fehler beim Speichern des Auth-Caches:', e);
-                    }
-                } else {
-                    // Cache leeren, wenn kein Benutzer
+                if (session?.user && mounted) {
+                    await fetchUserWithRetry(session);
+                } else if (mounted) {
                     try {
                         localStorage.removeItem(AUTH_CACHE_KEY);
                     } catch (e) {
@@ -65,37 +86,24 @@ export function AuthProvider({ children }) {
             } catch (error) {
                 console.error('Fehler beim Abrufen des Benutzers:', error);
             } finally {
-                setLoading(false);
-                setInitialized(true);
+                if (mounted) {
+                    setLoading(false);
+                    setInitialized(true);
+                }
             }
         };
 
         getUser();
 
-        // Auth-Status überwachen
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (event, session) => {
+                if (!mounted) return;
+
                 if (session?.user) {
-                    setUser(session.user);
-
-                    // Prüfen, ob der Benutzer Admin-Rechte hat
-                    const admin = await isAdmin(session.user.id);
-                    setAdminStatus(admin);
-
-                    // Cache aktualisieren
-                    try {
-                        localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify({
-                            user: session.user,
-                            isAdmin: admin
-                        }));
-                    } catch (e) {
-                        console.error('Fehler beim Speichern des Auth-Caches:', e);
-                    }
+                    await fetchUserWithRetry(session);
                 } else {
                     setUser(null);
                     setAdminStatus(false);
-
-                    // Cache leeren
                     try {
                         localStorage.removeItem(AUTH_CACHE_KEY);
                     } catch (e) {
@@ -108,11 +116,11 @@ export function AuthProvider({ children }) {
         );
 
         return () => {
+            mounted = false;
             subscription.unsubscribe();
         };
-    }, []);
+    }, [retryCount]);
 
-    // Memoisierte Werte, um unnötiges Re-Rendering zu vermeiden
     const value = useMemo(() => ({
         user,
         loading,
