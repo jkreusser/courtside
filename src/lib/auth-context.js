@@ -71,15 +71,22 @@ export function AuthProvider({ children }) {
                 }
             }
 
+            // Versuche die Session zu aktualisieren
+            const { data: refreshedSession, error: refreshError } = await supabase.auth.refreshSession();
+            if (refreshError) {
+                console.warn('Session-Aktualisierung fehlgeschlagen:', refreshError);
+                // Versuche trotzdem fortzufahren
+            }
+
             const admin = await isAdmin(session.user.id);
-            setUser(session.user);
+            setUser(refreshedSession?.session?.user || session.user);
             setAdminStatus(admin);
             setRetryCount(0);
             setLastActiveTimestamp(Date.now());
 
             try {
                 localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify({
-                    user: session.user,
+                    user: refreshedSession?.session?.user || session.user,
                     isAdmin: admin,
                     timestamp: Date.now()
                 }));
@@ -98,58 +105,10 @@ export function AuthProvider({ children }) {
         }
     };
 
-    // Verbesserter Visibility Change Handler für iOS
-    useEffect(() => {
-        if (typeof document === 'undefined') return;
-
-        let reactivationTimeout;
-        let lastHiddenTime = 0;
-
-        const handleVisibilityChange = async () => {
-            if (document.visibilityState === 'hidden') {
-                lastHiddenTime = Date.now();
-            } else if (document.visibilityState === 'visible') {
-                // Prüfe, ob die App länger als 5 Sekunden im Hintergrund war
-                const hiddenDuration = Date.now() - lastHiddenTime;
-                if (hiddenDuration > 5000) { // 5 Sekunden
-                    try {
-                        // Verzögere die Session-Überprüfung leicht für iOS
-                        clearTimeout(reactivationTimeout);
-                        reactivationTimeout = setTimeout(async () => {
-                            const { data: { session } } = await supabase.auth.getSession();
-                            if (session?.user) {
-                                await fetchUserWithRetry(session, true);
-                            }
-                        }, 100);
-                    } catch (error) {
-                        console.error('Fehler beim Wiederherstellen der Session:', error);
-                    }
-                }
-            }
-        };
-
-        // Aktivitäts-Tracking für PWA/iOS
-        const handleUserActivity = () => {
-            setLastActiveTimestamp(Date.now());
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        // Tracke Benutzeraktivität
-        document.addEventListener('touchstart', handleUserActivity);
-        document.addEventListener('mousemove', handleUserActivity);
-        document.addEventListener('keypress', handleUserActivity);
-
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            document.removeEventListener('touchstart', handleUserActivity);
-            document.removeEventListener('mousemove', handleUserActivity);
-            document.removeEventListener('keypress', handleUserActivity);
-            clearTimeout(reactivationTimeout);
-        };
-    }, []);
-
+    // Verbesserte Session-Wiederherstellung
     useEffect(() => {
         let mounted = true;
+        let sessionCheckInterval;
 
         const getUser = async () => {
             try {
@@ -176,6 +135,22 @@ export function AuthProvider({ children }) {
 
         getUser();
 
+        // Regelmäßige Session-Überprüfung
+        if (typeof window !== 'undefined') {
+            sessionCheckInterval = setInterval(() => {
+                const isPWA = window.matchMedia('(display-mode: standalone)').matches;
+                const isIOSHomeScreen = window.navigator.standalone;
+
+                if (isPWA || isIOSHomeScreen) {
+                    supabase.auth.getSession().then(({ data: { session } }) => {
+                        if (session?.user) {
+                            fetchUserWithRetry(session, true);
+                        }
+                    });
+                }
+            }, 60000); // Alle 60 Sekunden
+        }
+
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (event, session) => {
                 if (!mounted) return;
@@ -199,6 +174,9 @@ export function AuthProvider({ children }) {
         return () => {
             mounted = false;
             subscription.unsubscribe();
+            if (sessionCheckInterval) {
+                clearInterval(sessionCheckInterval);
+            }
         };
     }, [retryCount]);
 
