@@ -16,15 +16,35 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
                 try {
                     const value = localStorage.getItem(key);
                     if (!value) return null;
-                    // Versuche die Session wiederherzustellen, wenn die App aus dem Hintergrund kommt
-                    if (typeof window !== 'undefined' && document.visibilityState === 'visible') {
-                        const session = JSON.parse(value);
-                        if (session?.expires_at && new Date(session.expires_at * 1000) < new Date()) {
-                            localStorage.removeItem(key);
-                            return null;
+
+                    const isPWA = typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches;
+                    const isIOSHomeScreen = typeof window !== 'undefined' && window.navigator.standalone;
+
+                    // Versuche die Session wiederherzustellen
+                    const session = JSON.parse(value);
+
+                    // Längere Session-Gültigkeit für PWA/iOS
+                    if ((isPWA || isIOSHomeScreen) && session?.expires_at) {
+                        // Verlängere die Ablaufzeit für PWA/iOS
+                        const extendedExpiresAt = new Date(session.expires_at * 1000);
+                        extendedExpiresAt.setHours(extendedExpiresAt.getHours() + 12);
+                        session.expires_at = Math.floor(extendedExpiresAt.getTime() / 1000);
+
+                        // Speichere die verlängerte Session
+                        try {
+                            localStorage.setItem(key, JSON.stringify(session));
+                        } catch (e) {
+                            console.error('Fehler beim Speichern der verlängerten Session:', e);
                         }
                     }
-                    return value;
+
+                    // Prüfe Session-Gültigkeit
+                    if (session?.expires_at && new Date(session.expires_at * 1000) < new Date()) {
+                        localStorage.removeItem(key);
+                        return null;
+                    }
+
+                    return JSON.stringify(session);
                 } catch (error) {
                     console.error('Fehler beim Lesen der Session:', error);
                     return null;
@@ -32,7 +52,23 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
             },
             setItem: (key, value) => {
                 try {
-                    localStorage.setItem(key, value);
+                    const isPWA = typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches;
+                    const isIOSHomeScreen = typeof window !== 'undefined' && window.navigator.standalone;
+
+                    if (isPWA || isIOSHomeScreen) {
+                        // Verlängere die Session-Dauer für PWA/iOS
+                        const session = JSON.parse(value);
+                        if (session?.expires_at) {
+                            const extendedExpiresAt = new Date(session.expires_at * 1000);
+                            extendedExpiresAt.setHours(extendedExpiresAt.getHours() + 12);
+                            session.expires_at = Math.floor(extendedExpiresAt.getTime() / 1000);
+                            localStorage.setItem(key, JSON.stringify(session));
+                        } else {
+                            localStorage.setItem(key, value);
+                        }
+                    } else {
+                        localStorage.setItem(key, value);
+                    }
                 } catch (error) {
                     console.error('Fehler beim Speichern der Session:', error);
                 }
@@ -60,7 +96,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         },
         // Erhöhe Timeouts für instabile Verbindungen
         fetchOptions: {
-            timeout: 20000 // 20 Sekunden
+            timeout: 30000 // 30 Sekunden für bessere iOS-Unterstützung
         }
     }
 });

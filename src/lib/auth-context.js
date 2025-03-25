@@ -15,19 +15,33 @@ export function AuthProvider({ children }) {
     const [adminStatus, setAdminStatus] = useState(false);
     const [initialized, setInitialized] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
+    const [lastActiveTimestamp, setLastActiveTimestamp] = useState(Date.now());
     const MAX_RETRIES = 3;
     const RETRY_DELAY = 1000;
+    const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 Minuten
 
-    // Verbesserte Cache-Initialisierung
+    // Verbesserte Cache-Initialisierung mit iOS-Lesezeichen-Erkennung
     useEffect(() => {
+        const isPWA = window.matchMedia('(display-mode: standalone)').matches;
+        const isIOSHomeScreen = window.navigator.standalone;
+
         try {
             const cachedAuth = localStorage.getItem(AUTH_CACHE_KEY);
             if (cachedAuth) {
                 const { user: cachedUser, isAdmin: cachedAdmin, timestamp } = JSON.parse(cachedAuth);
-                // Prüfe ob der Cache nicht älter als 1 Stunde ist
-                if (cachedUser && Date.now() - timestamp < 3600000) {
+                // Längere Cache-Dauer für PWA/iOS-Lesezeichen
+                const maxAge = (isPWA || isIOSHomeScreen) ? 12 * 3600000 : 3600000; // 12 Stunden für PWA
+                if (cachedUser && Date.now() - timestamp < maxAge) {
                     setUser(cachedUser);
                     setAdminStatus(cachedAdmin);
+                    // Aktualisiere im Hintergrund
+                    setTimeout(() => {
+                        supabase.auth.getSession().then(({ data: { session } }) => {
+                            if (session?.user) {
+                                fetchUserWithRetry(session, true);
+                            }
+                        });
+                    }, 0);
                 } else {
                     localStorage.removeItem(AUTH_CACHE_KEY);
                 }
@@ -38,18 +52,30 @@ export function AuthProvider({ children }) {
         }
     }, []);
 
-    // Verbesserte Benutzerabruf-Funktion mit Retry-Logik
+    // Verbesserte Benutzerabruf-Funktion mit iOS-Optimierung
     const fetchUserWithRetry = async (session, force = false) => {
         try {
-            // Wenn nicht erzwungen und der Benutzer bereits geladen ist, überspringe
+            const isPWA = window.matchMedia('(display-mode: standalone)').matches;
+            const isIOSHomeScreen = window.navigator.standalone;
+
+            // Wenn nicht erzwungen und der Benutzer bereits geladen ist
             if (!force && user && user.id === session.user.id) {
-                return true;
+                // Prüfe auf Session-Timeout nur für PWA/iOS
+                if (isPWA || isIOSHomeScreen) {
+                    const timeSinceLastActive = Date.now() - lastActiveTimestamp;
+                    if (timeSinceLastActive < SESSION_TIMEOUT) {
+                        return true;
+                    }
+                } else {
+                    return true;
+                }
             }
 
             const admin = await isAdmin(session.user.id);
             setUser(session.user);
             setAdminStatus(admin);
             setRetryCount(0);
+            setLastActiveTimestamp(Date.now());
 
             try {
                 localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify({
@@ -72,27 +98,53 @@ export function AuthProvider({ children }) {
         }
     };
 
-    // Visibility Change Handler
+    // Verbesserter Visibility Change Handler für iOS
     useEffect(() => {
         if (typeof document === 'undefined') return;
 
+        let reactivationTimeout;
+        let lastHiddenTime = 0;
+
         const handleVisibilityChange = async () => {
-            if (document.visibilityState === 'visible') {
-                try {
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (session?.user) {
-                        // Force-Update der Session
-                        await fetchUserWithRetry(session, true);
+            if (document.visibilityState === 'hidden') {
+                lastHiddenTime = Date.now();
+            } else if (document.visibilityState === 'visible') {
+                // Prüfe, ob die App länger als 5 Sekunden im Hintergrund war
+                const hiddenDuration = Date.now() - lastHiddenTime;
+                if (hiddenDuration > 5000) { // 5 Sekunden
+                    try {
+                        // Verzögere die Session-Überprüfung leicht für iOS
+                        clearTimeout(reactivationTimeout);
+                        reactivationTimeout = setTimeout(async () => {
+                            const { data: { session } } = await supabase.auth.getSession();
+                            if (session?.user) {
+                                await fetchUserWithRetry(session, true);
+                            }
+                        }, 100);
+                    } catch (error) {
+                        console.error('Fehler beim Wiederherstellen der Session:', error);
                     }
-                } catch (error) {
-                    console.error('Fehler beim Wiederherstellen der Session:', error);
                 }
             }
         };
 
+        // Aktivitäts-Tracking für PWA/iOS
+        const handleUserActivity = () => {
+            setLastActiveTimestamp(Date.now());
+        };
+
         document.addEventListener('visibilitychange', handleVisibilityChange);
+        // Tracke Benutzeraktivität
+        document.addEventListener('touchstart', handleUserActivity);
+        document.addEventListener('mousemove', handleUserActivity);
+        document.addEventListener('keypress', handleUserActivity);
+
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
+            document.removeEventListener('touchstart', handleUserActivity);
+            document.removeEventListener('mousemove', handleUserActivity);
+            document.removeEventListener('keypress', handleUserActivity);
+            clearTimeout(reactivationTimeout);
         };
     }, []);
 
