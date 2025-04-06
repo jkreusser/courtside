@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { getRankings, getDailyRankings } from '@/lib/supabase';
+import { getRankings, getDailyRankings, getAvailableDates } from '@/lib/supabase';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Select, SelectOption } from '@/components/ui/Select';
 import toast from 'react-hot-toast';
@@ -14,7 +14,7 @@ function RankingsContent() {
     const [allTimeRankings, setAllTimeRankings] = useState([]);
     const [dailyRankings, setDailyRankings] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    const [selectedDate, setSelectedDate] = useState(null);
     const [availableDates, setAvailableDates] = useState([]);
     const [playerNames, setPlayerNames] = useState({});
     const [rankings, setRankings] = useState([]);
@@ -28,14 +28,19 @@ function RankingsContent() {
             try {
                 setLoading(true);
 
-                // Generiere Daten für die letzten 30 Tage für die Auswahl
-                const dates = [];
-                for (let i = 0; i < 30; i++) {
-                    const date = subDays(new Date(), i);
-                    dates.push(format(date, 'yyyy-MM-dd'));
+                // Hole die verfügbaren Daten
+                const { data: datesData, error: datesError } = await getAvailableDates();
+
+                if (datesError) {
+                    throw datesError;
                 }
-                if (isMounted) {
-                    setAvailableDates(dates);
+
+                if (isMounted && datesData) {
+                    setAvailableDates(datesData);
+                    // Setze das ausgewählte Datum auf das neueste verfügbare Datum
+                    if (datesData.length > 0 && !selectedDate) {
+                        setSelectedDate(datesData[0]);
+                    }
                 }
 
                 // Optimierte Rankings-Abfrage mit spezifischer Feldauswahl
@@ -46,7 +51,7 @@ function RankingsContent() {
                 }
 
                 // Optimierte Tagesrankings-Abfrage mit spezifischer Feldauswahl
-                const { data: dailyRankingsData, error: dailyRankingsError } = await getDailyRankings(selectedDate);
+                const { data: dailyRankingsData, error: dailyRankingsError } = await getDailyRankings(selectedDate || datesData[0]);
 
                 if (dailyRankingsError) {
                     throw dailyRankingsError;
@@ -55,62 +60,60 @@ function RankingsContent() {
                 if (isMounted) {
                     // Sammle einzigartige Spieler-IDs
                     const playerIds = new Set();
-                    rankingsData.forEach(ranking => {
-                        if (ranking.player_id) playerIds.add(ranking.player_id);
-                    });
-                    dailyRankingsData.forEach(ranking => {
-                        if (ranking.player_id) playerIds.add(ranking.player_id);
-                    });
+                    if (rankingsData) {
+                        rankingsData.forEach(ranking => {
+                            if (ranking.player_id) playerIds.add(ranking.player_id);
+                        });
+                    }
+                    if (dailyRankingsData) {
+                        dailyRankingsData.forEach(ranking => {
+                            if (ranking.player_id) playerIds.add(ranking.player_id);
+                        });
+                    }
 
                     // Lade Spielernamen in einem Batch
                     if (playerIds.size > 0) {
                         const { data: playersData, error: playersError } = await supabase
                             .from('players')
                             .select('id, name')
-                            .in('id', Array.from(playerIds))
-                            .throwOnError();
+                            .in('id', Array.from(playerIds));
 
                         if (!playersError && playersData) {
                             const namesMap = {};
                             playersData.forEach(player => {
                                 namesMap[player.id] = player.name;
                             });
+
+                            // Verarbeite die Rankings-Daten
+                            const processedRankings = rankingsData?.map((ranking, index) => ({
+                                ...ranking,
+                                rank: index + 1,
+                                player_name: namesMap[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`,
+                                total_points: ranking.total_points || 0
+                            })) || [];
+
+                            // Verarbeite die Tagesrankings-Daten
+                            const processedDailyRankings = dailyRankingsData?.map((ranking, index) => ({
+                                ...ranking,
+                                rank: index + 1,
+                                player_name: namesMap[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`,
+                                win_percentage: ranking.win_percentage || 0,
+                                games_won: ranking.games_won || 0,
+                                games_played: ranking.games_played || 0,
+                                daily_points: ranking.daily_points || 0
+                            })) || [];
+
                             if (isMounted) {
                                 setPlayerNames(namesMap);
-
-                                // Verarbeite die Rankings-Daten erst nachdem die Spielernamen geladen wurden
-                                const processedRankings = rankingsData.map((ranking, index) => ({
-                                    ...ranking,
-                                    rank: index + 1,
-                                    player_name: namesMap[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`
-                                }));
-
-                                // Verarbeite die Tagesrankings-Daten
-                                const processedDailyRankings = dailyRankingsData.map(ranking => ({
-                                    ...ranking,
-                                    player_name: namesMap[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`
-                                }));
-
                                 setRankings(processedRankings);
                                 setDailyRankings(processedDailyRankings);
                             }
                         }
                     } else {
-                        // Wenn keine Spieler-IDs vorhanden sind, verarbeite die Daten trotzdem
-                        const processedRankings = rankingsData.map((ranking, index) => ({
-                            ...ranking,
-                            rank: index + 1,
-                            player_name: `Spieler ${ranking.player_id.substring(0, 8)}...`
-                        }));
-
-                        const processedDailyRankings = dailyRankingsData.map(ranking => ({
-                            ...ranking,
-                            player_name: `Spieler ${ranking.player_id.substring(0, 8)}...`
-                        }));
-
+                        // Wenn keine Spieler-IDs vorhanden sind, setze leere Arrays
                         if (isMounted) {
-                            setRankings(processedRankings);
-                            setDailyRankings(processedDailyRankings);
+                            setRankings([]);
+                            setDailyRankings([]);
                         }
                     }
                 }
@@ -142,7 +145,7 @@ function RankingsContent() {
                         }
 
                         // Wiederhole die Tagesrankings-Abfrage
-                        const { data: retryDailyRankingsData, error: retryDailyRankingsError } = await getDailyRankings(selectedDate);
+                        const { data: retryDailyRankingsData, error: retryDailyRankingsError } = await getDailyRankings(selectedDate || datesData[0]);
 
                         if (retryDailyRankingsError) {
                             throw retryDailyRankingsError;
@@ -268,6 +271,7 @@ function RankingsContent() {
                                             <th className="text-left py-3 px-4">Winrate</th>
                                             <th className="text-left py-3 px-4">Siege</th>
                                             <th className="text-left py-3 px-4">Spiele</th>
+                                            <th className="text-left py-3 px-4">Punkte</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -285,6 +289,7 @@ function RankingsContent() {
                                                 </td>
                                                 <td className="py-3 px-4 font-mono">{player.games_won || 0}</td>
                                                 <td className="py-3 px-4 font-mono">{player.games_played || 0}</td>
+                                                <td className="py-3 px-4 font-mono text-primary">{player.total_points}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -308,9 +313,8 @@ function RankingsContent() {
                                 Wähle ein Datum:
                             </label>
                             <Select
-                                value={selectedDate}
+                                value={selectedDate || (availableDates.length > 0 ? availableDates[0] : '')}
                                 onChange={handleDateChange}
-                                className="w-full"
                             >
                                 {availableDates.map(date => (
                                     <SelectOption key={date} value={date}>
@@ -336,23 +340,27 @@ function RankingsContent() {
                                             <th className="text-left py-3 px-4">Winrate</th>
                                             <th className="text-left py-3 px-4">Siege</th>
                                             <th className="text-left py-3 px-4">Spiele</th>
+                                            <th className="text-left py-3 px-4">Punkte</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {dailyRankings.map((player, index) => (
                                             <tr
                                                 key={player.player_id}
-                                                className={`border-b border-zinc-800 ${index === 0 && dailyRankings.length > 1 ? 'bg-secondary text-white' : ''}`}
+                                                className={`${index === 0 ? 'bg-secondary text-white' : 'border-b border-zinc-800'}`}
                                             >
                                                 <td className="py-3 px-4 font-semibold">
                                                     {index + 1}
                                                 </td>
                                                 <td className="py-3 px-4">{player.player_name}</td>
-                                                <td className="py-3 px-4 font-mono text-primary">
-                                                    {player.win_percentage !== undefined ? `${player.win_percentage.toFixed(1)}%` : '0.0%'}
+                                                <td className="py-3 px-4 font-mono">
+                                                    {player.win_percentage !== undefined
+                                                        ? `${player.win_percentage.toFixed(1)}%`
+                                                        : '-'}
                                                 </td>
                                                 <td className="py-3 px-4 font-mono">{player.games_won || 0}</td>
                                                 <td className="py-3 px-4 font-mono">{player.games_played || 0}</td>
+                                                <td className="py-3 px-4 font-mono text-primary">{player.daily_points}</td>
                                             </tr>
                                         ))}
                                     </tbody>

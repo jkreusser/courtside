@@ -82,7 +82,8 @@ RETURNS TABLE (
     games_played INTEGER,
     games_won INTEGER,
     win_percentage NUMERIC,
-    last_played TIMESTAMP WITH TIME ZONE
+    last_played TIMESTAMP WITH TIME ZONE,
+    total_points INTEGER
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -92,7 +93,21 @@ BEGIN
             p.name as player_name,
             COUNT(g.*)::INTEGER as games_played,
             SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END)::INTEGER as games_won,
-            MAX(g.updated_at) as last_played
+            MAX(g.updated_at) as last_played,
+            SUM(
+                CASE 
+                    WHEN p.id = g.player1_id THEN (
+                        SELECT COALESCE(SUM(player1_score), 0) 
+                        FROM scores 
+                        WHERE game_id = g.id
+                    )
+                    ELSE (
+                        SELECT COALESCE(SUM(player2_score), 0) 
+                        FROM scores 
+                        WHERE game_id = g.id
+                    )
+                END
+            )::INTEGER as total_points
         FROM
             players p
         JOIN games g ON (p.id = g.player1_id OR p.id = g.player2_id)
@@ -105,7 +120,8 @@ BEGIN
         gd.games_played,
         gd.games_won,
         CASE WHEN gd.games_played > 0 THEN (gd.games_won::NUMERIC / gd.games_played) * 100 ELSE 0 END as win_percentage,
-        gd.last_played
+        gd.last_played,
+        gd.total_points
     FROM
         games_data gd
     ORDER BY
@@ -119,7 +135,8 @@ RETURNS TABLE (
     player_name TEXT,
     games_played INTEGER,
     games_won INTEGER,
-    win_percentage NUMERIC
+    win_percentage NUMERIC,
+    daily_points INTEGER
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -127,12 +144,23 @@ BEGIN
         SELECT
             p.id as player_id,
             p.name as player_name,
-            COUNT(g.*)::INTEGER as games_played,
-            SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END)::INTEGER as games_won
+            COUNT(m.*)::INTEGER as games_played,
+            SUM(CASE 
+                WHEN (m.player1_id = p.id AND m.score_player1 > m.score_player2) OR 
+                     (m.player2_id = p.id AND m.score_player2 > m.score_player1) 
+                THEN 1 
+                ELSE 0 
+            END)::INTEGER as games_won,
+            SUM(
+                CASE 
+                    WHEN p.id = m.player1_id THEN m.score_player1
+                    ELSE m.score_player2
+                END
+            )::INTEGER as daily_points
         FROM
             players p
-        JOIN games g ON (p.id = g.player1_id OR p.id = g.player2_id)
-        WHERE g.status = 'completed' AND DATE(g.updated_at) = target_date
+        JOIN matches m ON (p.id = m.player1_id OR p.id = m.player2_id)
+        WHERE m.is_complete = true AND m.date = target_date
         GROUP BY p.id, p.name
     )
     SELECT
@@ -140,7 +168,8 @@ BEGIN
         gd.player_name,
         gd.games_played,
         gd.games_won,
-        CASE WHEN gd.games_played > 0 THEN (gd.games_won::NUMERIC / gd.games_played) * 100 ELSE 0 END as win_percentage
+        CASE WHEN gd.games_played > 0 THEN (gd.games_won::NUMERIC / gd.games_played) * 100 ELSE 0 END as win_percentage,
+        gd.daily_points
     FROM
         games_data gd
     ORDER BY

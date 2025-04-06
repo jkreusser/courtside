@@ -1,0 +1,57 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Cursor AI Rule: **FkgBooking - Plattform zur digitalen Messeanmeldung**
+
+## Projektziele:
+- **Ziel:** Erstellen einer Plattform zur digitalen Anmeldung für die FKG-Karrieremesse.
+- **Zielgruppe:** Unternehmen, die sich für die FKG-Karrieremesse anmelden möchten.
+- **Hauptfunktionen:**
+  - Erstellung von Unternehmensprofilen.
+  - Auswahl von Messepaketen und Add-Ons (Vorträge, Workshops, etc.).
+  - Automatische Benachrichtigungen bei fehlenden Informationen.
+  - Exportierbare Daten für Backend-Management (CSV/Excel).
+  - Manuelle Prüfung und Freigabe der Anmeldungen.
+  - E-Mail-Verteiler für allgemeine Informationen (optional).
+
+## Tech-Stack:
+- **Frontend:**
+  - **Next.js:** Für schnelle, skalierbare Entwicklung der Plattform.
+  - **Tailwind CSS:** Für einfache und schnelle Gestaltung.
+  - **Shadcn UI:** Für moderne, benutzerfreundliche UI-Komponenten.
+- **Backend:**
+  - **Supabase:** Für Datenbank, Authentifizierung, API, DSGVO-konform.
+- **Hosting:**
+  - **Netlify:** Für Hosting und CI/CD, DSGVO-konform (Server in Frankfurt).
+- **Automatisierungen:**
+  - **Supabase Functions oder Netlify Functions:** Für Benachrichtigungs- und Backend-Funktionen.
+  - **E-Mail-Service:** **SendGrid** oder **Mailgun** für automatisierte E-Mails.
+- **Datenexport:** CSV oder Excel-Export der Unternehmensdaten.
+- **Sicherheit & Datenschutz:**
+  - **Supabase Auth:** DSGVO-konform.
+  - **Manuelle Prüfung:** Alle Unternehmensanmeldungen müssen vor der Freigabe manuell geprüft werden.
+
+## Funktionalitäten:
+1. **Unternehmensprofil erstellen:**
+   - Eingabefelder für: Name, Logo, Ansprechperson, Unternehmensbeschreibung.
+   
+2. **Messepaket-Auswahl:**
+   - Möglichkeit, aus verschiedenen Messepaketen und Add-Ons (Vorträge, Workshops, Einzelgespräche) auszuwählen.
+   
+3. **Automatische Benachrichtigung:**
+   - Benachrichtigung per E-Mail, wenn Pflichtfelder fehlen.
+   
+4. **Datenmanagement:**
+   - Einfache Verwaltung der erfassten Unternehmensdaten im Backend.
+   - Exportierbare Daten im CSV- oder Excel-Format.
+
+5. **Manuelle Prüfung:**
+   - Unternehmen müssen nach der Registrierung manuell geprüft werden, bevor sie freigeschaltet werden.
+   
+6. **Mail-Verteiler:**
+   - Möglichkeit, einen E-Mail-Verteiler für den Versand allgemeiner Informationen an registrierte Unternehmen zu erstellen.
+
+## Zusatzregel:
+- **Emoji-Regel:** Nach jeder Output-Nachricht von Cursor soll der Emoji 🚀 hinzugefügt werden, um sicherzustellen, dass die KI den festgelegten Regeln folgt.

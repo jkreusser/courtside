@@ -556,6 +556,7 @@ export default function DashboardPage() {
                         <th className="text-left py-3 px-2 sm:px-4">Winrate</th>
                         <th className="text-left py-3 px-2 sm:px-4">Siege</th>
                         <th className="text-left py-3 px-2 sm:px-4">Spiele</th>
+                        <th className="text-left py-3 px-2 sm:px-4">Punkte</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -575,6 +576,7 @@ export default function DashboardPage() {
                           </td>
                           <td className="py-3 px-2 sm:px-4 font-mono">{player.games_won || 0}</td>
                           <td className="py-3 px-2 sm:px-4 font-mono">{player.games_played || 0}</td>
+                          <td className="py-3 px-2 sm:px-4 font-mono text-primary">{player.total_points}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -834,12 +836,15 @@ function generatePerformanceData(games, userId) {
   // Gruppiere Spiele nach Spielsessions (oder Tagen bei weniger Spielen)
   const useWeekly = sortedGames.length > 14; // Bei mehr als 14 Spielen gruppieren wir nach Wochen
 
-  // Wenn es weniger als 3 eindeutige Tage gibt, gruppiere nach Sessions
+  // Zähle die eindeutigen Tage
   const uniqueDays = new Set(sortedGames.map(game =>
     new Date(game.created_at).toISOString().split('T')[0]
   )).size;
 
-  const useSessionGrouping = uniqueDays < 2;
+  // Wenn es weniger als 2 eindeutige Tage gibt, keine Daten zurückgeben
+  if (uniqueDays < 2) {
+    return [];
+  }
 
   // Spiele nach Zeitperioden gruppieren
   const gamesByPeriod = {};
@@ -848,11 +853,7 @@ function generatePerformanceData(games, userId) {
     const gameDate = new Date(game.created_at);
     let periodKey;
 
-    if (useSessionGrouping) {
-      // Bei nur einem Spieltag: Gruppiere je 3 Spiele zu einer Session
-      const sessionGroup = Math.floor(index / 3);
-      periodKey = `session-${sessionGroup}`;
-    } else if (useWeekly) {
+    if (useWeekly) {
       // Wochenbasierte Gruppierung
       const year = gameDate.getFullYear();
       const weekNumber = getWeekNumber(gameDate);
@@ -866,11 +867,9 @@ function generatePerformanceData(games, userId) {
       gamesByPeriod[periodKey] = {
         games: [],
         periodStart: gameDate,
-        displayDate: useSessionGrouping
-          ? `Session ${Math.floor(index / 3) + 1}`
-          : useWeekly
-            ? `KW${getWeekNumber(gameDate)}`
-            : gameDate.toLocaleDateString('de-DE', { month: 'short', day: 'numeric' })
+        displayDate: useWeekly
+          ? `KW${getWeekNumber(gameDate)}`
+          : gameDate.toLocaleDateString('de-DE', { month: 'short', day: 'numeric' })
       };
     }
 
@@ -929,18 +928,6 @@ function generatePerformanceData(games, userId) {
         : periodPointDiff
     });
   });
-
-  // Stelle sicher, dass mindestens zwei Datenpunkte vorhanden sind
-  if (chartData.length === 1) {
-    chartData.push({
-      ...chartData[0],
-      date: 'Heute',
-      winrate: chartData[0].winrate,
-      punkteDifferenz: chartData[0].punkteDifferenz,
-      spiele: 0,
-      kumulativ: chartData[0].kumulativ
-    });
-  }
 
   return chartData;
 }

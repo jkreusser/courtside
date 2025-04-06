@@ -580,31 +580,119 @@ export const getRankings = async (useCache = true, limit = 50) => {
 };
 
 export const getDailyRankings = async (date, useCache = true, limit = 50) => {
-    // Prüfe Cache, wenn erlaubt
-    if (useCache &&
-        queryCache.dailyRankings.data[date] &&
-        Date.now() - queryCache.dailyRankings.timestamp[date] < CACHE_DURATION) {
-        return { data: queryCache.dailyRankings.data[date], error: null };
-    }
-
     try {
-        const result = await retryQuery(async () => {
-            return await supabase
-                .rpc('get_daily_rankings', { target_date: date })
-                .limit(limit);
-        });
+        // Konvertiere das Datum in den korrekten Zeitraum für den Tag
+        const startOfDay = new Date(date);
+        startOfDay.setUTCHours(0, 0, 0, 0);
+        const endOfDay = new Date(date);
+        endOfDay.setUTCHours(23, 59, 59, 999);
 
-        // Aktualisiere Cache
-        if (result.data && !result.error) {
-            queryCache.dailyRankings.data[date] = result.data;
-            queryCache.dailyRankings.timestamp[date] = Date.now();
-            queryCache.dailyRankings.version++;
-        }
+        const result = await retryQuery(async () => {
+            const { data, error } = await supabase
+                .from('games')
+                .select(`
+                    id,
+                    player1_id,
+                    player2_id,
+                    winner_id,
+                    scores (
+                        player1_score,
+                        player2_score
+                    ),
+                    created_at
+                `)
+                .gte('created_at', startOfDay.toISOString())
+                .lt('created_at', endOfDay.toISOString())
+                .eq('status', 'completed');
+
+            if (error) throw error;
+
+            // Berechne die Statistiken pro Spieler
+            const playerStats = {};
+
+            data.forEach(game => {
+                // Initialisiere Spielerstatistiken falls noch nicht vorhanden
+                if (!playerStats[game.player1_id]) {
+                    playerStats[game.player1_id] = { games_played: 0, games_won: 0, daily_points: 0 };
+                }
+                if (!playerStats[game.player2_id]) {
+                    playerStats[game.player2_id] = { games_played: 0, games_won: 0, daily_points: 0 };
+                }
+
+                // Zähle gespielte Spiele
+                playerStats[game.player1_id].games_played++;
+                playerStats[game.player2_id].games_played++;
+
+                // Zähle Siege
+                if (game.winner_id === game.player1_id) {
+                    playerStats[game.player1_id].games_won++;
+                } else if (game.winner_id === game.player2_id) {
+                    playerStats[game.player2_id].games_won++;
+                }
+
+                // Addiere Punkte
+                if (game.scores && game.scores.length > 0) {
+                    playerStats[game.player1_id].daily_points += game.scores.reduce((sum, score) => sum + score.player1_score, 0);
+                    playerStats[game.player2_id].daily_points += game.scores.reduce((sum, score) => sum + score.player2_score, 0);
+                }
+            });
+
+            // Konvertiere in Array-Format und berechne Winrate
+            const rankings = Object.entries(playerStats).map(([player_id, stats]) => ({
+                player_id,
+                games_played: stats.games_played,
+                games_won: stats.games_won,
+                win_percentage: stats.games_played > 0 ? (stats.games_won / stats.games_played) * 100 : 0,
+                daily_points: stats.daily_points
+            }));
+
+            // Sortiere nach Winrate und dann nach Siegen
+            rankings.sort((a, b) => {
+                if (b.win_percentage !== a.win_percentage) {
+                    return b.win_percentage - a.win_percentage;
+                }
+                return b.games_won - a.games_won;
+            });
+
+            return { data: rankings, error: null };
+        });
 
         return result;
     } catch (error) {
-        // Keine Toast-Nachricht mehr hier
-        console.error(`Fehler beim Laden des Rankings für ${date} (nach Wiederholungen):`, error);
+        console.error(`Fehler beim Laden des Rankings für ${date}:`, error);
+        return { data: null, error };
+    }
+};
+
+export const getAvailableDates = async () => {
+    try {
+        const result = await retryQuery(async () => {
+            const { data, error } = await supabase
+                .from('games')
+                .select('created_at')
+                .eq('status', 'completed')
+                .order('created_at', { ascending: false });
+
+            return { data, error };
+        });
+
+        if (result.error) {
+            throw result.error;
+        }
+
+        // Extrahiere eindeutige Daten im Format YYYY-MM-DD
+        const uniqueDates = [...new Set(
+            result.data.map(game => {
+                const date = new Date(game.created_at);
+                // Setze die Zeit auf Mitternacht UTC
+                date.setUTCHours(0, 0, 0, 0);
+                return date.toISOString().split('T')[0];
+            })
+        )].sort((a, b) => b.localeCompare(a));
+
+        return { data: uniqueDates, error: null };
+    } catch (error) {
+        console.error('Fehler beim Laden der verfügbaren Daten:', error);
         return { data: null, error };
     }
 };
