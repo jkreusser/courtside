@@ -19,7 +19,7 @@ const ChartContainer = ({ children }) => (
 );
 
 // Stabile Ladekomponente, die mindestens X ms angezeigt wird, um Flackern zu vermeiden
-const StableLoadingState = ({ isLoading, children, minLoadingTime = 500 }) => {
+const StableLoadingState = ({ isLoading, children, minLoadingTime = 800 }) => {
   const [showLoading, setShowLoading] = useState(isLoading);
   const loadingStartTime = useRef(0);
 
@@ -54,23 +54,25 @@ export default function DashboardPage() {
   const [dashboardState, setDashboardState] = useState({
     players: [],
     games: [],
-    loading: false, // Beginne mit loading false
+    loading: false,
     error: null,
     rankings: [],
     playerNames: {},
     recentGames: [],
     recentPlayers: [],
     reconnectAttempts: 0,
-    initialLoadComplete: false // Neuer Zustand, um zu verfolgen, ob die Erstladung abgeschlossen ist
+    initialLoadComplete: false,
+    isLoadingData: false // Zusätzliches Flag für präzisere Ladekontrolle
   });
   const [lastDataUpdate, setLastDataUpdate] = useState(0);
   const loadingTimeoutRef = useRef(null);
+  const fetchLockRef = useRef(false); // Neuer Mutex-Mechanismus für Ladeoperationen
 
   // Destructure state for convenience
   const {
     players, games, loading, error, rankings,
     playerNames, recentGames, recentPlayers, reconnectAttempts,
-    initialLoadComplete
+    initialLoadComplete, isLoadingData
   } = dashboardState;
 
   // Update state in batches to reduce renders
@@ -116,22 +118,32 @@ export default function DashboardPage() {
   const fetchDashboardData = useCallback(async () => {
     if (!user || authLoading) return;
 
-    // Vermeide mehrfache Ladezustände bei schnellen Wiederholungen
-    if (loading) return;
+    // Verhindern, dass mehrere Ladeoperationen parallel laufen
+    if (fetchLockRef.current || isLoadingData) {
+      console.log('Lade-Vorgang bereits aktiv, überspringe...');
+      return;
+    }
 
-    // Setze Ladestatus mit verzögerter Anzeige
+    // Setze Mutex-Lock
+    fetchLockRef.current = true;
+
+    // Setze Ladestatus mit verzögerter Anzeige für UI
     if (!initialLoadComplete) {
-      updateDashboardState({ loading: true });
+      // Beim ersten Laden direkt loading=true setzen
+      updateDashboardState({ loading: true, isLoadingData: true });
     } else {
       // Bei nachfolgenden Ladungen warten wir kurz, bevor wir den Ladezustand anzeigen
-      // um Flackern bei schnellen Antworten zu vermeiden
       if (loadingTimeoutRef.current) {
         clearTimeout(loadingTimeoutRef.current);
       }
 
+      // Sofort isLoadingData setzen (interne Sperre)
+      updateDashboardState({ isLoadingData: true });
+
+      // Verzögert loading=true setzen (UI-Anzeige)
       loadingTimeoutRef.current = setTimeout(() => {
         updateDashboardState({ loading: true });
-      }, 300); // Verzögere das Anzeigen des Ladezustands um 300ms
+      }, 500); // Längere Verzögerung um Flackern zu vermeiden
     }
 
     try {
@@ -147,8 +159,13 @@ export default function DashboardPage() {
 
           updateDashboardState({
             error: 'Keine Verbindung zur Datenbank. Versuche, die Verbindung wiederherzustellen...',
-            loading: false
+            loading: false,
+            isLoadingData: false
           });
+
+          // Mutex-Lock freigeben
+          fetchLockRef.current = false;
+
           setTimeout(attemptReconnectLocal, 2000);
           return;
         }
@@ -156,7 +173,7 @@ export default function DashboardPage() {
 
       // Parallel data fetching for speed
       const [gamesResponse, playersResponse, recentGamesResponse, recentPlayersResponse] = await Promise.all([
-        // User games
+        // User games - Cache-Header hinzufügen
         supabase
           .from('games')
           .select(`
@@ -331,6 +348,7 @@ export default function DashboardPage() {
         recentPlayers: recentPlayersResponse.data || [],
         playerNames: namesMap,
         loading: false,
+        isLoadingData: false,
         error: null,
         initialLoadComplete: true
       });
@@ -345,14 +363,18 @@ export default function DashboardPage() {
 
       updateDashboardState({
         error: 'Fehler beim Laden der Daten',
-        loading: false
+        loading: false,
+        isLoadingData: false
       });
 
       if (!loading) {
         toast.error('Fehler beim Laden der Dashboard-Daten');
       }
+    } finally {
+      // Mutex-Lock in jedem Fall freigeben
+      fetchLockRef.current = false;
     }
-  }, [user, authLoading, loading, connectionStatus, playerNames, initialLoadComplete, authCheckConnection, attemptReconnectLocal, updateDashboardState]);
+  }, [user, authLoading, connectionStatus, playerNames, initialLoadComplete, isLoadingData, authCheckConnection, attemptReconnectLocal, updateDashboardState]);
 
   // Effect for initial loading and updates for logged-in users
   useEffect(() => {
@@ -607,7 +629,7 @@ export default function DashboardPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <StableLoadingState isLoading={loading} minLoadingTime={600}>
+          <StableLoadingState isLoading={loading} minLoadingTime={800}>
             {games.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-zinc-500 mb-4">Du hast noch keine Spiele.</p>
