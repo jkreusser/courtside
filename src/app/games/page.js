@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import { useRouter } from 'next/navigation';
@@ -81,7 +81,6 @@ function GamesPageContent() {
 
                     retryCount++;
                     const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
-                    console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
 
                     await new Promise(resolve => setTimeout(resolve, delay));
 
@@ -363,9 +362,21 @@ function GamesPageContent() {
                                                         {game.sets_to_win ? `Best of ${game.sets_to_win * 2 - 1}` : 'Best of 5'}
                                                     </span>
                                                 </div>
-                                                <div className="font-medium text-lg">
+                                                <div className="font-medium">
                                                     {game.scores && game.scores.length > 0 ? (
-                                                        <span>{player1Sets} : {player2Sets}</span>
+                                                        <div className="font-mono text-sm text-right">
+                                                            {game.scores.map((score, index) => (
+                                                                <div key={index} className="mb-1">
+                                                                    <span className={score.player1_score > score.player2_score ? 'text-primary font-medium' : ''}>
+                                                                        {score.player1_score}
+                                                                    </span>
+                                                                    :
+                                                                    <span className={score.player2_score > score.player1_score ? 'text-primary font-medium' : ''}>
+                                                                        {score.player2_score}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
                                                     ) : (
                                                         <span className="text-zinc-500 text-sm">Keine Ergebnisse</span>
                                                     )}
@@ -418,9 +429,19 @@ function GamesPageContent() {
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         {game.scores && game.scores.length > 0 ? (
-                                                            <span className="font-medium">
-                                                                {player1Sets} : {player2Sets}
-                                                            </span>
+                                                            <div className="font-mono text-sm">
+                                                                {game.scores.map((score, index) => (
+                                                                    <div key={index} className="mb-1">
+                                                                        <span className={score.player1_score > score.player2_score ? 'text-primary font-medium' : ''}>
+                                                                            {score.player1_score}
+                                                                        </span>
+                                                                        :
+                                                                        <span className={score.player2_score > score.player1_score ? 'text-primary font-medium' : ''}>
+                                                                            {score.player2_score}
+                                                                        </span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
                                                         ) : (
                                                             <span className="text-zinc-500">Keine Ergebnisse</span>
                                                         )}

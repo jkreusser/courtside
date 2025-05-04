@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import { useRouter, useParams } from 'next/navigation';
@@ -139,7 +139,6 @@ export default function ScheduleDetailPage() {
 
                     retryCount++;
                     const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
-                    console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
 
                     await new Promise(resolve => setTimeout(resolve, delay));
 

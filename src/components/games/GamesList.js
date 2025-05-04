@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getGames } from '@/lib/supabase';
+import { getGames } from '@/lib/supabase-client';
 import { useDataRefresh } from '@/lib/hooks/useDataRefresh';
 
 export default function GamesList() {

@@ -1,37 +1,163 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { supabase, getPlayers, getRankings } from '@/lib/supabase';
+import { useState, useEffect, useMemo, useCallback, Suspense, useRef } from 'react';
+import { supabase, checkConnection, getRankings } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area } from 'recharts';
+import { Info } from 'lucide-react';
+
+// Chart component with fallback that loads charts more efficiently
+const ChartContainer = ({ children }) => (
+  <Suspense fallback={<div className="h-64 w-full flex items-center justify-center">Lade Diagramm...</div>}>
+    {children}
+  </Suspense>
+);
+
+// Stabile Ladekomponente, die mindestens X ms angezeigt wird, um Flackern zu vermeiden
+const StableLoadingState = ({ isLoading, children, minLoadingTime = 500 }) => {
+  const [showLoading, setShowLoading] = useState(isLoading);
+  const loadingStartTime = useRef(0);
+
+  useEffect(() => {
+    if (isLoading) {
+      setShowLoading(true);
+      loadingStartTime.current = Date.now();
+    } else {
+      const loadingElapsed = Date.now() - loadingStartTime.current;
+      const remainingLoadTime = Math.max(0, minLoadingTime - loadingElapsed);
+
+      // Verzögere das Ausblenden des Ladebildschirms, wenn noch nicht genug Zeit vergangen ist
+      if (remainingLoadTime > 0) {
+        const timer = setTimeout(() => {
+          setShowLoading(false);
+        }, remainingLoadTime);
+        return () => clearTimeout(timer);
+      } else {
+        setShowLoading(false);
+      }
+    }
+  }, [isLoading, minLoadingTime]);
+
+  return showLoading ? (
+    <div className="text-center py-8">Lade Spiele...</div>
+  ) : children;
+};
 
 export default function DashboardPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, connectionStatus, checkConnection: authCheckConnection } = useAuth();
   const router = useRouter();
-  const [players, setPlayers] = useState([]);
-  const [games, setGames] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [rankings, setRankings] = useState([]);
-  const [playerNames, setPlayerNames] = useState({});
-  const [recentGames, setRecentGames] = useState([]);
-  const [recentPlayers, setRecentPlayers] = useState([]);
+  const [dashboardState, setDashboardState] = useState({
+    players: [],
+    games: [],
+    loading: false, // Beginne mit loading false
+    error: null,
+    rankings: [],
+    playerNames: {},
+    recentGames: [],
+    recentPlayers: [],
+    reconnectAttempts: 0,
+    initialLoadComplete: false // Neuer Zustand, um zu verfolgen, ob die Erstladung abgeschlossen ist
+  });
+  const [lastDataUpdate, setLastDataUpdate] = useState(0);
+  const loadingTimeoutRef = useRef(null);
 
-  // Wenn angemeldet, lade Spiele des Benutzers
-  useEffect(() => {
-    const fetchGames = async () => {
-      if (!user) return;
+  // Destructure state for convenience
+  const {
+    players, games, loading, error, rankings,
+    playerNames, recentGames, recentPlayers, reconnectAttempts,
+    initialLoadComplete
+  } = dashboardState;
 
-      try {
-        setLoading(true);
+  // Update state in batches to reduce renders
+  const updateDashboardState = useCallback((newState) => {
+    setDashboardState(prev => ({ ...prev, ...newState }));
+  }, []);
 
-        // Lade alle Spiele, an denen der Benutzer teilnimmt
-        const { data, error } = await supabase
+  // Verbindungswiederherstellung (als memoized Funktion)
+  const attemptReconnectLocal = useCallback(async () => {
+    if (reconnectAttempts > 5) {
+      updateDashboardState({
+        error: "Maximale Anzahl an Wiederverbindungsversuchen erreicht. Bitte laden Sie die Seite neu."
+      });
+      return false;
+    }
+
+    updateDashboardState({
+      reconnectAttempts: reconnectAttempts + 1,
+      error: "Versuche, die Verbindung wiederherzustellen..."
+    });
+
+    // Kurze Pause vor Wiederverbindung
+    await new Promise(r => setTimeout(r, 1000));
+
+    // Verbindung prüfen
+    const isConnected = await checkConnection();
+
+    if (isConnected) {
+      updateDashboardState({ error: null });
+      // Löst nur einen Datenrefresh aus, keine Navigation
+      setLastDataUpdate(Date.now());
+      return true;
+    } else {
+      updateDashboardState({
+        error: "Verbindung konnte nicht wiederhergestellt werden. Weiterer Versuch in 5 Sekunden..."
+      });
+      setTimeout(attemptReconnectLocal, 5000);
+      return false;
+    }
+  }, [reconnectAttempts, checkConnection, updateDashboardState]);
+
+  // Combined data fetching function to reduce separate API calls
+  const fetchDashboardData = useCallback(async () => {
+    if (!user || authLoading) return;
+
+    // Vermeide mehrfache Ladezustände bei schnellen Wiederholungen
+    if (loading) return;
+
+    // Setze Ladestatus mit verzögerter Anzeige
+    if (!initialLoadComplete) {
+      updateDashboardState({ loading: true });
+    } else {
+      // Bei nachfolgenden Ladungen warten wir kurz, bevor wir den Ladezustand anzeigen
+      // um Flackern bei schnellen Antworten zu vermeiden
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+
+      loadingTimeoutRef.current = setTimeout(() => {
+        updateDashboardState({ loading: true });
+      }, 300); // Verzögere das Anzeigen des Ladezustands um 300ms
+    }
+
+    try {
+      // Check connection first
+      if (connectionStatus !== 'connected') {
+        const isConnected = await authCheckConnection();
+        if (!isConnected) {
+          // Lade-Timeout löschen, falls vorhanden
+          if (loadingTimeoutRef.current) {
+            clearTimeout(loadingTimeoutRef.current);
+            loadingTimeoutRef.current = null;
+          }
+
+          updateDashboardState({
+            error: 'Keine Verbindung zur Datenbank. Versuche, die Verbindung wiederherzustellen...',
+            loading: false
+          });
+          setTimeout(attemptReconnectLocal, 2000);
+          return;
+        }
+      }
+
+      // Parallel data fetching for speed
+      const [gamesResponse, playersResponse, recentGamesResponse, recentPlayersResponse] = await Promise.all([
+        // User games
+        supabase
           .from('games')
           .select(`
             *,
@@ -40,210 +166,15 @@ export default function DashboardPage() {
             scores(*)
           `)
           .or(`player1_id.eq.${user.id},player2_id.eq.${user.id}`)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false }),
 
-        if (error) {
-          throw error;
-        }
+        // All players
+        supabase
+          .from('players')
+          .select('*'),
 
-        setGames(data || []);
-      } catch (error) {
-        toast.error('Fehler beim Laden der Spiele');
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (user && !authLoading) {
-      fetchGames();
-    }
-  }, [user, authLoading]);
-
-  // Lade die Top-Spieler für die Rangliste
-  useEffect(() => {
-    const fetchPlayers = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        // Wenn der Benutzer nicht angemeldet ist, verwende die getRankings-Funktion,
-        // ansonsten die vorhandene Implementierung
-        if (!user) {
-          const { data: rankingsData, error: rankingsError } = await getRankings(true, 5);
-
-          if (rankingsError) {
-            console.error('Fehler beim Laden der Rangliste:', JSON.stringify(rankingsError));
-            setError(`Rangliste konnte nicht geladen werden: ${rankingsError.message || 'Unbekannter Fehler'}`);
-            setRankings([]);
-            return;
-          }
-
-          setRankings(rankingsData || []);
-          setLoading(false);
-          return;
-        }
-
-        // Verwende die optimierte getPlayers-Funktion mit Caching
-        const { data: playersData, error: playersError } = await getPlayers();
-
-        if (playersError) {
-          console.error('Fehler beim Laden der Spieler:', JSON.stringify(playersError));
-          setError(`Spieler konnten nicht geladen werden: ${playersError.message || 'Unbekannter Fehler'}`);
-          setPlayers([]);
-          return;
-        }
-
-        // Wenn keine Spieler vorhanden sind, einfach leeres Array zurückgeben
-        if (!playersData || playersData.length === 0) {
-          setPlayers([]);
-          return;
-        }
-
-        try {
-          // Verbesserte Spiele-Abfrage mit Limitierung und Attributselektion
-          const { data: gamesData, error: gamesError } = await supabase
-            .from('games')
-            .select(`
-              id, 
-              player1_id, 
-              player2_id, 
-              winner_id, 
-              status,
-              scores(id, player1_score, player2_score)
-            `)
-            .eq('status', 'completed')
-            .limit(100); // Limitiere die Anzahl, erhöhe bei Bedarf
-
-          // Wenn es einen Fehler gibt oder keine Spiele existieren, zeige nur die Spieler an
-          if (gamesError) {
-            console.warn('Fehler beim Laden der Spiele:', JSON.stringify(gamesError));
-            setPlayers(playersData.map(player => ({
-              ...player,
-              games: 0,
-              wins: 0,
-              losses: 0,
-              winRate: 0,
-              wonSets: 0,
-              lostSets: 0,
-              pointRatio: 0
-            })));
-            return;
-          }
-
-          if (!gamesData || gamesData.length === 0) {
-            console.log('Keine Spiele gefunden');
-            setPlayers(playersData.map(player => ({
-              ...player,
-              games: 0,
-              wins: 0,
-              losses: 0,
-              winRate: 0,
-              wonSets: 0,
-              lostSets: 0,
-              pointRatio: 0
-            })));
-            return;
-          }
-
-          // Berechne Statistiken für jeden Spieler
-          const playersWithStats = playersData.map(player => {
-            const playerGames = gamesData.filter(game =>
-              game.player1_id === player.id || game.player2_id === player.id
-            );
-
-            const wins = playerGames.filter(game => game.winner_id === player.id).length;
-            const totalGames = playerGames.length;
-            const winRate = totalGames > 0 ? (wins / totalGames) * 100 : 0;
-
-            // Zähle gewonnene und verlorene Sätze
-            let wonSets = 0;
-            let lostSets = 0;
-
-            playerGames.forEach(game => {
-              if (!game.scores || !Array.isArray(game.scores)) return;
-
-              const isPlayer1 = game.player1_id === player.id;
-
-              game.scores.forEach(score => {
-                if (isPlayer1) {
-                  if (score.player1_score > score.player2_score) {
-                    wonSets++;
-                  } else if (score.player1_score < score.player2_score) {
-                    lostSets++;
-                  }
-                } else {
-                  if (score.player2_score > score.player1_score) {
-                    wonSets++;
-                  } else if (score.player2_score < score.player1_score) {
-                    lostSets++;
-                  }
-                }
-              });
-            });
-
-            // Berechne Punkteverhältnis
-            const pointRatio = lostSets > 0 ? wonSets / lostSets : wonSets > 0 ? Infinity : 0;
-
-            return {
-              ...player,
-              games: totalGames,
-              wins,
-              losses: totalGames - wins,
-              winRate,
-              wonSets,
-              lostSets,
-              pointRatio
-            };
-          });
-
-          // Sortiere Spieler nach Siege, dann nach Punkteverhältnis
-          const sortedPlayers = playersWithStats.sort((a, b) => {
-            if (a.wins !== b.wins) {
-              return b.wins - a.wins; // Absteigend nach Siegen
-            }
-            return b.pointRatio - a.pointRatio; // Absteigend nach Punkteverhältnis
-          });
-
-          setPlayers(sortedPlayers);
-        } catch (gameError) {
-          console.error('Fehler bei der Verarbeitung der Spiele:', gameError);
-          // Fallback: Zeige nur die Spieler ohne Statistik an
-          setPlayers(playersData.map(player => ({
-            ...player,
-            games: 0,
-            wins: 0,
-            losses: 0,
-            winRate: 0,
-            wonSets: 0,
-            lostSets: 0,
-            pointRatio: 0
-          })));
-        }
-      } catch (error) {
-        console.error('Unerwarteter Fehler beim Laden der Rangliste:', error);
-        setError('Die Rangliste konnte nicht geladen werden');
-        setPlayers([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchPlayers();
-  }, [user]);  // Abhängigkeit auf den Benutzer hinzugefügt
-
-  useEffect(() => {
-    let isMounted = true;
-    let retryTimeout;
-
-    const fetchDashboardData = async () => {
-      if (!user) return;
-
-      try {
-        setLoading(true);
-
-        // Optimierte Spiele-Abfrage mit spezifischer Feldauswahl
-        const { data: gamesData, error: gamesError } = await supabase
+        // Recent games (for dashboard)
+        supabase
           .from('games')
           .select(`
             id,
@@ -259,15 +190,10 @@ export default function DashboardPage() {
             )
           `)
           .order('created_at', { ascending: false })
-          .limit(5)
-          .throwOnError();
+          .limit(5),
 
-        if (gamesError) {
-          throw gamesError;
-        }
-
-        // Optimierte Spieler-Abfrage mit spezifischer Feldauswahl
-        const { data: playersData, error: playersError } = await supabase
+        // Recent players
+        supabase
           .from('players')
           .select(`
             id,
@@ -276,186 +202,245 @@ export default function DashboardPage() {
           `)
           .order('created_at', { ascending: false })
           .limit(5)
-          .throwOnError();
+      ]);
 
-        if (playersError) {
-          throw playersError;
-        }
+      // Handle any errors from the responses
+      if (gamesResponse.error) throw gamesResponse.error;
+      if (playersResponse.error) throw playersResponse.error;
+      if (recentGamesResponse.error) throw recentGamesResponse.error;
+      if (recentPlayersResponse.error) throw recentPlayersResponse.error;
 
-        if (isMounted) {
-          // Sammle einzigartige Spieler-IDs
-          const playerIds = new Set();
-          gamesData.forEach(game => {
-            if (game.player1_id) playerIds.add(game.player1_id);
-            if (game.player2_id) playerIds.add(game.player2_id);
+      // Process player names for all games at once
+      const allPlayerIds = new Set();
+
+      // Collect player IDs from all game data
+      [...(gamesResponse.data || []), ...(recentGamesResponse.data || [])].forEach(game => {
+        if (game.player1_id) allPlayerIds.add(game.player1_id);
+        if (game.player2_id) allPlayerIds.add(game.player2_id);
+      });
+
+      let namesMap = { ...playerNames }; // Start with existing names
+
+      // If we have new player IDs, fetch them
+      if (allPlayerIds.size > 0) {
+        const { data: playerNamesData, error: playerNamesError } = await supabase
+          .from('players')
+          .select('id, name')
+          .in('id', Array.from(allPlayerIds));
+
+        if (!playerNamesError && playerNamesData) {
+          playerNamesData.forEach(player => {
+            namesMap[player.id] = player.name;
           });
-
-          // Lade Spielernamen in einem Batch
-          if (playerIds.size > 0) {
-            const { data: playerNamesData, error: playerNamesError } = await supabase
-              .from('players')
-              .select('id, name')
-              .in('id', Array.from(playerIds))
-              .throwOnError();
-
-            if (!playerNamesError && playerNamesData) {
-              const namesMap = {};
-              playerNamesData.forEach(player => {
-                namesMap[player.id] = player.name;
-              });
-              if (isMounted) {
-                setPlayerNames(namesMap);
-              }
-            }
-          }
-
-          // Verarbeite die Spiele-Daten
-          const processedGames = gamesData.map(game => ({
-            ...game,
-            player1_name: playerNames[game.player1_id] || `Spieler ${game.player1_id.substring(0, 8)}...`,
-            player2_name: playerNames[game.player2_id] || `Spieler ${game.player2_id.substring(0, 8)}...`
-          }));
-
-          if (isMounted) {
-            setRecentGames(processedGames);
-            setRecentPlayers(playersData);
-          }
-        }
-      } catch (error) {
-        console.error('Fehler beim Laden der Dashboard-Daten:', error);
-        toast.error('Fehler beim Laden der Dashboard-Daten');
-
-        // Wiederholungsversuch mit exponentieller Verzögerung
-        let retryCount = 0;
-        const maxRetries = 5;
-        const retryWithBackoff = async () => {
-          if (retryCount >= maxRetries || !isMounted) return;
-
-          retryCount++;
-          const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
-          console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
-
-          await new Promise(resolve => setTimeout(resolve, delay));
-
-          try {
-            // Wiederhole die Spiele-Abfrage
-            const { data: retryGamesData, error: retryGamesError } = await supabase
-              .from('games')
-              .select(`
-                id,
-                player1_id,
-                player2_id,
-                status,
-                created_at,
-                updated_at,
-                scores (
-                  id,
-                  player1_score,
-                  player2_score
-                )
-              `)
-              .order('created_at', { ascending: false })
-              .limit(5)
-              .throwOnError();
-
-            if (retryGamesError) {
-              throw retryGamesError;
-            }
-
-            // Wiederhole die Spieler-Abfrage
-            const { data: retryPlayersData, error: retryPlayersError } = await supabase
-              .from('players')
-              .select(`
-                id,
-                name,
-                created_at
-              `)
-              .order('created_at', { ascending: false })
-              .limit(5)
-              .throwOnError();
-
-            if (retryPlayersError) {
-              throw retryPlayersError;
-            }
-
-            if (isMounted) {
-              // Sammle einzigartige Spieler-IDs
-              const playerIds = new Set();
-              retryGamesData.forEach(game => {
-                if (game.player1_id) playerIds.add(game.player1_id);
-                if (game.player2_id) playerIds.add(game.player2_id);
-              });
-
-              // Lade Spielernamen in einem Batch
-              if (playerIds.size > 0) {
-                const { data: retryPlayerNamesData, error: retryPlayerNamesError } = await supabase
-                  .from('players')
-                  .select('id, name')
-                  .in('id', Array.from(playerIds))
-                  .throwOnError();
-
-                if (!retryPlayerNamesError && retryPlayerNamesData) {
-                  const namesMap = {};
-                  retryPlayerNamesData.forEach(player => {
-                    namesMap[player.id] = player.name;
-                  });
-                  setPlayerNames(namesMap);
-                }
-              }
-
-              // Verarbeite die Spiele-Daten
-              const processedGames = retryGamesData.map(game => ({
-                ...game,
-                player1_name: playerNames[game.player1_id] || `Spieler ${game.player1_id.substring(0, 8)}...`,
-                player2_name: playerNames[game.player2_id] || `Spieler ${game.player2_id.substring(0, 8)}...`
-              }));
-
-              setRecentGames(processedGames);
-              setRecentPlayers(retryPlayersData);
-              return true;
-            }
-          } catch (retryError) {
-            console.error('Fehler beim Wiederholungsversuch:', retryError);
-          }
-
-          if (retryCount < maxRetries && isMounted) {
-            return retryWithBackoff();
-          }
-
-          return false;
-        };
-
-        const success = await retryWithBackoff();
-        if (!success && isMounted) {
-          // Setze einen Timeout für den nächsten Versuch
-          retryTimeout = setTimeout(() => {
-            router.refresh();
-          }, 5000);
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
         }
       }
-    };
 
+      // Process player statistics for rankings
+      let playersWithStats = [];
+
+      if (playersResponse.data && playersResponse.data.length > 0) {
+        // Get completed games for stats calculation
+        const { data: completedGamesData } = await supabase
+          .from('games')
+          .select(`
+              id, 
+              player1_id, 
+              player2_id, 
+              winner_id, 
+              status,
+              scores(id, player1_score, player2_score)
+            `)
+          .eq('status', 'completed')
+          .limit(100);
+
+        // Calculate stats for each player
+        playersWithStats = playersResponse.data.map(player => {
+          const playerGames = completedGamesData?.filter(game =>
+            game.player1_id === player.id || game.player2_id === player.id
+          ) || [];
+
+          const wins = playerGames.filter(game => game.winner_id === player.id).length;
+          const totalGames = playerGames.length;
+          const winRate = totalGames > 0 ? (wins / totalGames) * 100 : 0;
+
+          // Count won and lost sets
+          let wonSets = 0;
+          let lostSets = 0;
+
+          playerGames.forEach(game => {
+            if (!game.scores || !Array.isArray(game.scores)) return;
+
+            const isPlayer1 = game.player1_id === player.id;
+
+            game.scores.forEach(score => {
+              if (isPlayer1) {
+                if (score.player1_score > score.player2_score) {
+                  wonSets++;
+                } else if (score.player1_score < score.player2_score) {
+                  lostSets++;
+                }
+              } else {
+                if (score.player2_score > score.player1_score) {
+                  wonSets++;
+                } else if (score.player2_score < score.player1_score) {
+                  lostSets++;
+                }
+              }
+            });
+          });
+
+          const pointRatio = lostSets > 0 ? wonSets / lostSets : wonSets > 0 ? Infinity : 0;
+
+          return {
+            ...player,
+            games: totalGames,
+            wins,
+            losses: totalGames - wins,
+            winRate,
+            wonSets,
+            lostSets,
+            pointRatio
+          };
+        });
+
+        // Sort players 
+        playersWithStats.sort((a, b) => {
+          if (a.wins !== b.wins) return b.wins - a.wins;
+          return b.pointRatio - a.pointRatio;
+        });
+      }
+
+      // Process recent games with player names
+      const processedRecentGames = recentGamesResponse.data?.map(game => ({
+        ...game,
+        player1_name: namesMap[game.player1_id] || `Spieler ${game.player1_id?.substring(0, 8)}...`,
+        player2_name: namesMap[game.player2_id] || `Spieler ${game.player2_id?.substring(0, 8)}...`
+      })) || [];
+
+      // Lade-Timeout löschen
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+
+      // Batch update all state in einem einzigen Update
+      updateDashboardState({
+        games: gamesResponse.data || [],
+        players: playersWithStats,
+        recentGames: processedRecentGames,
+        recentPlayers: recentPlayersResponse.data || [],
+        playerNames: namesMap,
+        loading: false,
+        error: null,
+        initialLoadComplete: true
+      });
+    } catch (error) {
+      console.error('Fehler beim Laden der Dashboard-Daten:', error);
+
+      // Lade-Timeout löschen
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+
+      updateDashboardState({
+        error: 'Fehler beim Laden der Daten',
+        loading: false
+      });
+
+      if (!loading) {
+        toast.error('Fehler beim Laden der Dashboard-Daten');
+      }
+    }
+  }, [user, authLoading, loading, connectionStatus, playerNames, initialLoadComplete, authCheckConnection, attemptReconnectLocal, updateDashboardState]);
+
+  // Effect for initial loading and updates for logged-in users
+  useEffect(() => {
     if (user && !authLoading) {
       fetchDashboardData();
     }
 
+    // Cleanup-Funktion, um Timeouts zu löschen
     return () => {
-      isMounted = false;
-      if (retryTimeout) {
-        clearTimeout(retryTimeout);
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
       }
     };
-  }, [user, authLoading, router]);
+  }, [user, authLoading, lastDataUpdate, fetchDashboardData]);
 
+  // Separate effect for loading rankings for non-logged-in users
+  useEffect(() => {
+    if (!user && !authLoading) {
+      const fetchRankings = async () => {
+        updateDashboardState({ loading: true });
+        try {
+          // Check connection first
+          const isConnected = await checkConnection();
+          if (!isConnected) {
+            updateDashboardState({
+              error: 'Keine Verbindung zur Datenbank.',
+              loading: false
+            });
+            return;
+          }
+
+          // Hole die Rankings direkt aus der Supabase Client-Funktion, 
+          // die bereits Spielernamen enthält und richtige Punktzählung nutzt
+          const { data: rankingsData, error: rankingsError } = await supabase
+            .from('rankings_view')
+            .select('*')
+            .order('win_percentage', { ascending: false })
+            .limit(5);
+
+          if (rankingsError) {
+            console.error('Fehler bei Rankings-Abfrage:', rankingsError);
+            // Fallback zur Client-Funktion, wenn die View nicht funktioniert
+            const { data: calculatedRankings, error } = await getRankings(false, 5);
+
+            if (error) throw error;
+
+            updateDashboardState({
+              rankings: calculatedRankings || [],
+              loading: false
+            });
+            return;
+          }
+
+          updateDashboardState({
+            rankings: rankingsData || [],
+            loading: false
+          });
+        } catch (err) {
+          console.error('Fehler beim Laden der Rangliste:', err);
+          updateDashboardState({
+            error: 'Fehler beim Laden der Rangliste',
+            loading: false
+          });
+        }
+      };
+
+      fetchRankings();
+    }
+  }, [user, authLoading, updateDashboardState, checkConnection]);
+
+  // Memoized chart data
+  const performanceData = useMemo(() => {
+    // Wenn kein User oder keine Spiele, leeres Array zurückgeben
+    if (!user?.id || !games || games.length < 2) return [];
+
+    return generatePerformanceData(games, user.id);
+  }, [games, user?.id]);
+
+  const pointDifferenceData = useMemo(() => {
+    return generatePointDifferenceData(games, user?.id);
+  }, [games, user?.id]);
+
+  // Handle auth loading with consistent UI
   if (authLoading) {
     return <div className="text-center py-8">Lade...</div>;
   }
 
-  // Für nicht angemeldete Benutzer: Willkommensseite mit Login-Button
+  // For non-logged-in users: Welcome page with login button
   if (!user) {
     return (
       <div className="space-y-6 sm:space-y-8">
@@ -590,10 +575,29 @@ export default function DashboardPage() {
     );
   }
 
-  // Für angemeldete Benutzer: Dashboard mit persönlichen Daten
+  // For logged-in users: Dashboard with personal data
   return (
     <div className="space-y-6 sm:space-y-8">
       <h1 className="text-2xl sm:text-3xl font-bold">Mein CourtSide</h1>
+
+      {error && (
+        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 rounded shadow-sm">
+          <div className="flex items-center space-x-2">
+            <Info className="h-5 w-5" />
+            <p>{error}</p>
+            {connectionStatus === 'disconnected' && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto"
+                onClick={attemptReconnectLocal}
+              >
+                Verbindung wiederherstellen
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -603,68 +607,68 @@ export default function DashboardPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <div className="text-center py-8">Lade Spiele...</div>
-          ) : games.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-zinc-500 mb-4">Du hast noch keine Spiele.</p>
-              <Link href="/games/new">
-                <Button className="w-full sm:w-auto">Neues Spiel erstellen</Button>
-              </Link>
-            </div>
-          ) : (
-            <div className="space-y-3 sm:space-y-4">
-              {games.slice(0, 3).map((game) => {
-                const isPlayer1 = game.player1_id === user.id;
-                const opponent = isPlayer1 ? game.player2 : game.player1;
-                const score = game.scores && game.scores.length > 0
-                  ? game.scores.map((set) => `${isPlayer1 ? set.player1_score : set.player2_score}:${isPlayer1 ? set.player2_score : set.player1_score}`).join(', ')
-                  : 'Noch kein Ergebnis';
-
-                let statusBadge;
-                if (game.status === 'scheduled') {
-                  statusBadge = <span className="px-2 py-1 text-xs rounded-full bg-zinc-800 text-white">Geplant</span>;
-                } else if (game.status === 'in_progress') {
-                  statusBadge = <span className="px-2 py-1 text-xs rounded-full bg-white text-black">Läuft</span>;
-                } else if (game.status === 'completed') {
-                  const hasWon = game.winner_id === user.id;
-                  statusBadge = hasWon
-                    ? <span className="px-2 py-1 text-xs rounded-full bg-secondary text-primary">Gewonnen</span>
-                    : <span className="px-2 py-1 text-xs rounded-full bg-zinc-800 text-white">Verloren</span>;
-                }
-
-                return (
-                  <Link href={`/games/${game.id}`} key={game.id} className="block">
-                    <div className="border border-zinc-800 rounded-md p-3 sm:p-4 hover:border-zinc-600 hover:bg-zinc-900/30 transition-colors">
-                      <div className="flex flex-col sm:flex-row sm:justify-between gap-2 sm:gap-4">
-                        <div>
-                          <h3 className="font-semibold text-base sm:text-lg mb-1">
-                            Gegen {opponent && opponent.name ? opponent.name : 'Unbekannt'}
-                          </h3>
-                          <div className="text-xs sm:text-sm text-zinc-400">
-                            {new Date(game.created_at).toLocaleDateString('de-DE')}
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between sm:justify-normal sm:space-x-4">
-                          <div className="text-sm font-mono">{score}</div>
-                          {statusBadge}
-                        </div>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-
-              <div className="text-center mt-6 space-y-2 sm:space-y-0 sm:space-x-2">
-                <Link href="/games" className="block sm:inline-block w-full sm:w-auto">
-                  <Button variant="outline" className="w-full sm:w-auto">Alle Spiele anzeigen</Button>
-                </Link>
-                <Link href="/games/new" className="block sm:inline-block w-full sm:w-auto mt-2 sm:mt-0">
+          <StableLoadingState isLoading={loading} minLoadingTime={600}>
+            {games.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-zinc-500 mb-4">Du hast noch keine Spiele.</p>
+                <Link href="/games/new">
                   <Button className="w-full sm:w-auto">Neues Spiel erstellen</Button>
                 </Link>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="space-y-3 sm:space-y-4">
+                {games.slice(0, 3).map((game) => {
+                  const isPlayer1 = game.player1_id === user.id;
+                  const opponent = isPlayer1 ? game.player2 : game.player1;
+                  const score = game.scores && game.scores.length > 0
+                    ? game.scores.map((set) => `${isPlayer1 ? set.player1_score : set.player2_score}:${isPlayer1 ? set.player2_score : set.player1_score}`).join(', ')
+                    : 'Noch kein Ergebnis';
+
+                  let statusBadge;
+                  if (game.status === 'scheduled') {
+                    statusBadge = <span className="px-2 py-1 text-xs rounded-full bg-zinc-800 text-white">Geplant</span>;
+                  } else if (game.status === 'in_progress') {
+                    statusBadge = <span className="px-2 py-1 text-xs rounded-full bg-white text-black">Läuft</span>;
+                  } else if (game.status === 'completed') {
+                    const hasWon = game.winner_id === user.id;
+                    statusBadge = hasWon
+                      ? <span className="px-2 py-1 text-xs rounded-full bg-secondary text-primary">Gewonnen</span>
+                      : <span className="px-2 py-1 text-xs rounded-full bg-zinc-800 text-white">Verloren</span>;
+                  }
+
+                  return (
+                    <Link href={`/games/${game.id}`} key={game.id} className="block">
+                      <div className="border border-zinc-800 rounded-md p-3 sm:p-4 hover:border-zinc-600 hover:bg-zinc-900/30 transition-colors">
+                        <div className="flex flex-col sm:flex-row sm:justify-between gap-2 sm:gap-4">
+                          <div>
+                            <h3 className="font-semibold text-base sm:text-lg mb-1">
+                              Gegen {opponent && opponent.name ? opponent.name : 'Unbekannt'}
+                            </h3>
+                            <div className="text-xs sm:text-sm text-zinc-400">
+                              {new Date(game.created_at).toLocaleDateString('de-DE')}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between sm:justify-normal sm:space-x-4">
+                            <div className="text-sm font-mono">{score}</div>
+                            {statusBadge}
+                          </div>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+
+                <div className="text-center mt-6 space-y-2 sm:space-y-0 sm:space-x-2">
+                  <Link href="/games" className="block sm:inline-block w-full sm:w-auto">
+                    <Button variant="outline" className="w-full sm:w-auto">Alle Spiele anzeigen</Button>
+                  </Link>
+                  <Link href="/games/new" className="block sm:inline-block w-full sm:w-auto mt-2 sm:mt-0">
+                    <Button className="w-full sm:w-auto">Neues Spiel erstellen</Button>
+                  </Link>
+                </div>
+              </div>
+            )}
+          </StableLoadingState>
         </CardContent>
       </Card>
 
@@ -674,14 +678,14 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle>Winrate</CardTitle>
             <CardDescription>
-              Deine Erfolgsquote im Zeitverlauf
+              Deine Erfolgsquote pro Spieltag
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            {games.length >= 3 && generatePerformanceData(games, user.id).length > 1 ? (
+            {games.length >= 3 && performanceData.length >= 2 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart
-                  data={generatePerformanceData(games, user.id)}
+                  data={performanceData}
                   margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
                 >
                   <defs>
@@ -701,6 +705,7 @@ export default function DashboardPage() {
                     tickLine={{ stroke: '#4b5563' }}
                     axisLine={{ stroke: '#4b5563' }}
                     tickFormatter={(value) => `${Math.round(value * 100)}%`}
+                    domain={[0, 1]} // Fest auf 0% bis 100% setzen
                   />
                   <Tooltip
                     contentStyle={{
@@ -725,9 +730,7 @@ export default function DashboardPage() {
                     dot={{ stroke: '#10b981', strokeWidth: 2, r: 4, fill: '#1c1c1e' }}
                     activeDot={{ r: 6, stroke: '#059669', strokeWidth: 2, fill: '#10b981' }}
                     name="Winrate"
-                    filter="url(#shadow)"
-                    fillOpacity={0.3}
-                    fill="#0A100E"
+                    connectNulls={true}
                     animationDuration={500}
                     animationBegin={0}
                     animationEasing="ease-out"
@@ -753,64 +756,66 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            {games.length >= 3 && generatePointDifferenceData(games, user.id).length >= 3 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={generatePointDifferenceData(games, user.id)}
-                  margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
-                >
-                  <defs>
-                    <filter id="shadow" height="200%">
-                      <feDropShadow dx="0" dy="3" stdDeviation="3" floodOpacity="0.1" />
-                    </filter>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
-                  <XAxis
-                    dataKey="gameNumber"
-                    tick={{ fill: '#9ca3af', fontSize: 12 }}
-                    tickLine={{ stroke: '#4b5563' }}
-                    axisLine={{ stroke: '#4b5563' }}
-                    label={{ value: 'Spiel #', position: 'insideBottomRight', offset: -5, fill: '#9ca3af' }}
-                  />
-                  <YAxis
-                    tick={{ fill: '#9ca3af', fontSize: 12 }}
-                    tickLine={{ stroke: '#4b5563' }}
-                    axisLine={{ stroke: '#4b5563' }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1c1c1e',
-                      borderColor: '#2c2c2e',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-                      color: '#e5e7eb'
-                    }}
-                    itemStyle={{ color: '#e5e7eb' }}
-                    formatter={(value, name) => {
-                      if (name === 'punkteDifferenz') return [value, 'Punktedifferenz'];
-                      return [value, name];
-                    }}
-                    labelFormatter={(value) => `Spiel #${value}`}
-                    labelStyle={{ color: '#e5e7eb', fontWeight: 'bold', marginBottom: '5px' }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="punkteDifferenz"
-                    stroke="#10b981"
-                    strokeWidth={3}
-                    dot={{ stroke: '#10b981', strokeWidth: 2, r: 4, fill: '#1c1c1e' }}
-                    activeDot={{ r: 6, stroke: '#059669', strokeWidth: 2, fill: '#10b981' }}
-                    name="Punktedifferenz"
-                    filter="url(#shadow)"
-                    fillOpacity={0.3}
-                    fill="#0A100E"
-                    animationDuration={2000}
-                    animationBegin={0}
-                    animationEasing="ease-out"
-                    isAnimationActive={true}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+            {games.length >= 3 && pointDifferenceData.length >= 3 ? (
+              <ChartContainer>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={pointDifferenceData}
+                    margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
+                  >
+                    <defs>
+                      <filter id="shadow" height="200%">
+                        <feDropShadow dx="0" dy="3" stdDeviation="3" floodOpacity="0.1" />
+                      </filter>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
+                    <XAxis
+                      dataKey="gameNumber"
+                      tick={{ fill: '#9ca3af', fontSize: 12 }}
+                      tickLine={{ stroke: '#4b5563' }}
+                      axisLine={{ stroke: '#4b5563' }}
+                      label={{ value: 'Spiel #', position: 'insideBottomRight', offset: -5, fill: '#9ca3af' }}
+                    />
+                    <YAxis
+                      tick={{ fill: '#9ca3af', fontSize: 12 }}
+                      tickLine={{ stroke: '#4b5563' }}
+                      axisLine={{ stroke: '#4b5563' }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#1c1c1e',
+                        borderColor: '#2c2c2e',
+                        borderRadius: '8px',
+                        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+                        color: '#e5e7eb'
+                      }}
+                      itemStyle={{ color: '#e5e7eb' }}
+                      formatter={(value, name) => {
+                        if (name === 'punkteDifferenz') return [value, 'Punktedifferenz'];
+                        return [value, name];
+                      }}
+                      labelFormatter={(value) => `Spiel #${value}`}
+                      labelStyle={{ color: '#e5e7eb', fontWeight: 'bold', marginBottom: '5px' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="punkteDifferenz"
+                      stroke="#10b981"
+                      strokeWidth={3}
+                      dot={{ stroke: '#10b981', strokeWidth: 2, r: 4, fill: '#1c1c1e' }}
+                      activeDot={{ r: 6, stroke: '#059669', strokeWidth: 2, fill: '#10b981' }}
+                      name="Punktedifferenz"
+                      filter="url(#shadow)"
+                      fillOpacity={0.3}
+                      fill="#0A100E"
+                      animationDuration={0} // Reduce animation for less flicker
+                      animationBegin={0}
+                      animationEasing="ease-out"
+                      isAnimationActive={false} // Disable animation completely
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartContainer>
             ) : (
               <div className="flex flex-col h-full items-center justify-center text-center text-zinc-500">
                 <p className="mb-2">Noch nicht genügend Spiele für Statistiken.</p>
@@ -826,107 +831,79 @@ export default function DashboardPage() {
 
 // Funktion zur Generierung der Performance-Daten
 function generatePerformanceData(games, userId) {
-  if (!games || !games.length) return [];
+  if (!games || !games.length || !userId) return [];
 
-  // Spiele nach Datum sortieren
+  // Kopie der Spiele erstellen und nach Datum sortieren
   const sortedGames = [...games].sort((a, b) =>
     new Date(a.created_at) - new Date(b.created_at)
   );
 
-  // Gruppiere Spiele nach Spielsessions (oder Tagen bei weniger Spielen)
-  const useWeekly = sortedGames.length > 14; // Bei mehr als 14 Spielen gruppieren wir nach Wochen
-
-  // Zähle die eindeutigen Tage
-  const uniqueDays = new Set(sortedGames.map(game =>
-    new Date(game.created_at).toISOString().split('T')[0]
-  )).size;
-
-  // Wenn es weniger als 2 eindeutige Tage gibt, keine Daten zurückgeben
-  if (uniqueDays < 2) {
+  // Wenn weniger als 2 Spiele, leeres Array zurückgeben
+  if (sortedGames.length < 2) {
     return [];
   }
 
-  // Spiele nach Zeitperioden gruppieren
-  const gamesByPeriod = {};
+  // Gruppiere Spiele nach Datum
+  const gamesByDate = {};
 
-  sortedGames.forEach((game, index) => {
+  // Nur abgeschlossene Spiele berücksichtigen
+  sortedGames.filter(game => game.status === 'completed').forEach(game => {
+    // Überspringe Spiele ohne gültiges Datum
+    if (!game.created_at) return;
+
     const gameDate = new Date(game.created_at);
-    let periodKey;
+    // Überprüfen, ob das Datum gültig ist
+    if (isNaN(gameDate.getTime())) return;
 
-    if (useWeekly) {
-      // Wochenbasierte Gruppierung
-      const year = gameDate.getFullYear();
-      const weekNumber = getWeekNumber(gameDate);
-      periodKey = `${year}-W${weekNumber}`;
-    } else {
-      // Tagesbasierte Gruppierung
-      periodKey = gameDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
-    }
+    // Datum auf Tag genau (ohne Uhrzeit)
+    const dateKey = gameDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
 
-    if (!gamesByPeriod[periodKey]) {
-      gamesByPeriod[periodKey] = {
+    if (!gamesByDate[dateKey]) {
+      gamesByDate[dateKey] = {
         games: [],
-        periodStart: gameDate,
-        displayDate: useWeekly
-          ? `KW${getWeekNumber(gameDate)}`
-          : gameDate.toLocaleDateString('de-DE', { month: 'short', day: 'numeric' })
+        displayDate: gameDate.toLocaleDateString('de-DE', { month: 'short', day: 'numeric' }),
+        timestamp: gameDate.getTime() // Für Sortierung
       };
     }
 
-    gamesByPeriod[periodKey].games.push(game);
+    gamesByDate[dateKey].games.push(game);
   });
 
-  // Sortiere die Perioden chronologisch
-  const sortedPeriods = Object.values(gamesByPeriod).sort((a, b) =>
-    a.periodStart - b.periodStart
-  );
+  // Sortiere die Tage chronologisch
+  const sortedDays = Object.values(gamesByDate).sort((a, b) => a.timestamp - b.timestamp);
 
-  // Erstelle die Daten für das Diagramm
+  // Wenn weniger als 2 Tage mit Spielen, leeres Array zurückgeben
+  if (sortedDays.length < 2) {
+    return [];
+  }
+
+  // Berechne die Winrate für jeden Tag (nicht kumulativ)
   const chartData = [];
 
-  sortedPeriods.forEach((period, idx) => {
-    // Berechne die Statistiken für diese Periode
-    let wins = 0;
-    let gamesInPeriod = 0;
-    let periodPointDiff = 0;
+  sortedDays.forEach(dayData => {
+    let winsToday = 0;
+    let gamesToday = 0;
 
-    period.games.forEach(game => {
-      gamesInPeriod++;
-
-      // Berechne, ob der aktuelle Nutzer gewonnen hat
-      const isWinner = game.winner_id === userId;
-      if (isWinner) wins++;
-
-      // Berechne Punktedifferenz für den aktuellen Spieler
-      if (game.scores && game.scores.length) {
-        const isPlayer1 = game.player1_id === userId;
-
-        game.scores.forEach(score => {
-          if (isPlayer1) {
-            periodPointDiff += score.player1_score - score.player2_score;
-          } else {
-            periodPointDiff += score.player2_score - score.player1_score;
-          }
-        });
+    // Berechne Gewinne und Spiele für diesen Tag
+    dayData.games.forEach(game => {
+      gamesToday++;
+      if (game.winner_id === userId) {
+        winsToday++;
       }
     });
 
-    // Berechne die Winrate für diese Periode
-    const periodWinRate = gamesInPeriod > 0 ? wins / gamesInPeriod : 0;
+    // Nur Tage mit mindestens einem Spiel hinzufügen
+    if (gamesToday > 0) {
+      // Berechne die Winrate für diesen Tag
+      const winrate = parseFloat((winsToday / gamesToday).toFixed(2));
 
-    // Berechne die durchschnittliche Punktedifferenz pro Spiel für diese Periode
-    const avgPointDiff = gamesInPeriod > 0 ? periodPointDiff / gamesInPeriod : 0;
-
-    // Füge die Daten für diese Periode zum Chart hinzu
-    chartData.push({
-      date: period.displayDate,
-      winrate: periodWinRate,
-      punkteDifferenz: Math.round(avgPointDiff),
-      spiele: gamesInPeriod,
-      kumulativ: chartData.length > 0
-        ? chartData[chartData.length - 1].kumulativ + periodPointDiff
-        : periodPointDiff
-    });
+      // Füge Datenpunkt hinzu
+      chartData.push({
+        date: dayData.displayDate,
+        winrate: winrate,
+        spiele: gamesToday
+      });
+    }
   });
 
   return chartData;

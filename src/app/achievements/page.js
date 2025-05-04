@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-client';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import {
@@ -16,7 +16,12 @@ import {
     FlagIcon,
     SparklesIcon,
     RocketLaunchIcon,
-    LockClosedIcon
+    LockClosedIcon,
+    ShieldExclamationIcon,
+    ArrowPathIcon,
+    ScissorsIcon,
+    GlobeAltIcon,
+    AcademicCapIcon
 } from '@heroicons/react/24/outline';
 import { CheckCircleIcon } from '@heroicons/react/24/solid';
 
@@ -57,7 +62,7 @@ export default function AchievementsPage() {
         {
             id: 'streak_3',
             name: 'Siegesserie',
-            icon: <TrophyIcon className="h-8 w-8" />,
+            icon: <FireIcon className="h-8 w-8" />,
             description: 'Gewinne 3 Spiele in Folge',
             threshold: 3,
             type: 'streak',
@@ -65,7 +70,7 @@ export default function AchievementsPage() {
         {
             id: 'streak_5',
             name: 'Unaufhaltsam',
-            icon: <FireIcon className="h-8 w-8" />,
+            icon: <BoltIcon className="h-8 w-8" />,
             description: 'Gewinne 5 Spiele in Folge',
             threshold: 5,
             type: 'streak',
@@ -73,7 +78,7 @@ export default function AchievementsPage() {
         {
             id: 'streak_10',
             name: 'Dominator',
-            icon: <BoltIcon className="h-8 w-8" />,
+            icon: <RocketLaunchIcon className="h-8 w-8" />,
             description: 'Gewinne 10 Spiele in Folge',
             threshold: 10,
             type: 'streak',
@@ -97,7 +102,7 @@ export default function AchievementsPage() {
         {
             id: 'matches_50',
             name: 'CourtSide-Veteran',
-            icon: <StarIcon className="h-8 w-8" />,
+            icon: <AcademicCapIcon className="h-8 w-8" />,
             description: 'Spiele 50 Spiele',
             threshold: 50,
             type: 'games',
@@ -114,7 +119,31 @@ export default function AchievementsPage() {
             id: 'underdog',
             title: 'Underdog',
             description: 'Besiege einen höher platzierten Spieler',
-            icon: <RocketLaunchIcon className="h-8 w-8" />,
+            icon: <ShieldExclamationIcon className="h-8 w-8" />,
+            backgroundColor: 'bg-secondary',
+            textColor: 'text-primary'
+        },
+        {
+            id: 'perfect_match',
+            title: 'Perfektes Spiel',
+            description: 'Gewinne ein Match ohne einen einzigen Punkt zu verlieren',
+            icon: <StarIcon className="h-8 w-8" />,
+            backgroundColor: 'bg-secondary',
+            textColor: 'text-primary'
+        },
+        {
+            id: 'comeback_king',
+            title: 'Comeback-König',
+            description: 'Gewinne ein Spiel nach 0:2 Satzrückstand',
+            icon: <ArrowPathIcon className="h-8 w-8" />,
+            backgroundColor: 'bg-secondary',
+            textColor: 'text-primary'
+        },
+        {
+            id: 'win_streak_breaker',
+            title: 'Serienkiller',
+            description: 'Beende die Siegesserie eines Spielers mit mindestens 5 Siegen in Folge',
+            icon: <ScissorsIcon className="h-8 w-8" />,
             backgroundColor: 'bg-secondary',
             textColor: 'text-primary'
         }
@@ -195,7 +224,6 @@ export default function AchievementsPage() {
 
                         retryCount++;
                         const delay = 1000 * Math.pow(2, retryCount - 1);
-                        console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
 
                         await new Promise(resolve => setTimeout(resolve, delay));
 

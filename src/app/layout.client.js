@@ -9,7 +9,7 @@ import Link from "next/link";
 import PageTransitionScript from "@/components/PageTransitionScript";
 import { Suspense, useEffect } from "react";
 import ConnectionStatus from "@/components/layout/ConnectionStatus";
-import { reconnectSupabase } from '@/lib/supabase';
+import { reconnectSupabase } from '@/lib/supabase-client';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

@@ -1,6 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { AuthProvider } from "@/lib/auth-context";
+import { AuthProvider } from "@/lib/auth-provider";
 import Header from "@/components/layout/Header";
 import ToastProvider from "@/components/ui/ToastProvider";
 import Link from "next/link";

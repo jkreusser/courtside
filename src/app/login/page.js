@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { signInWithAccessCode, createUserWithAccessCode } from '@/lib/supabase';
+import { signInWithAccessCode, createUserWithAccessCode } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -16,6 +16,7 @@ export default function LoginPage() {
     const [isNewUser, setIsNewUser] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [loadingState, setLoadingState] = useState('');
+    const [formError, setFormError] = useState(null);
 
     const handleSignIn = async (e) => {
         e.preventDefault();
@@ -38,11 +39,11 @@ export default function LoginPage() {
 
         try {
             setIsLoading(true);
+            setFormError(null);
 
             // Wenn es ein neuer Benutzer ist, erstellen wir direkt einen Account
             if (isNewUser) {
                 setLoadingState('Erstelle neuen Benutzer...');
-                console.log('Erstelle neuen Benutzer mit:', { email, name, accessCode, role: 'player' });
 
                 const { data, error } = await createUserWithAccessCode(
                     email,
@@ -51,11 +52,9 @@ export default function LoginPage() {
                     'player'
                 );
 
-                console.log('Ergebnis der Benutzerregistrierung:', { data, error });
-
                 if (error) {
                     setLoadingState('Fehler bei der Registrierung');
-                    console.error('Registrierungsfehler:', error);
+                    setFormError(error.message);
 
                     if (error.message && error.message.includes('Zugangscode ist nicht korrekt')) {
                         toast.error('Der eingegebene Zugangscode ist nicht korrekt.');
@@ -84,19 +83,10 @@ export default function LoginPage() {
             } else {
                 // Bestehender Benutzer versucht sich anzumelden
                 setLoadingState('Anmeldung läuft...');
-                console.log('Versuche Anmeldung mit:', { email, accessCode });
 
                 const { data, error } = await signInWithAccessCode(email, accessCode);
 
-                console.log('Ergebnis der Anmeldung:', { data, error });
-
-                // Der Benutzer existiert nicht, aber der Zugangscode ist korrekt - wechsle direkt in den Registrierungsmodus
-                if (error && error.message && (
-                    error.message.includes('Invalid login credentials') ||
-                    error.message.includes('User not found') ||
-                    error.message.includes('Benutzer nicht gefunden') ||
-                    (error.name === 'AuthApiError' && error.status === 400)
-                )) {
+                if (error) {
                     setLoadingState('Benutzer nicht gefunden');
                     setIsNewUser(true);
                     // Setze einen Standardnamen aus der E-Mail-Adresse
@@ -118,7 +108,7 @@ export default function LoginPage() {
                 } else if (error) {
                     setLoadingState('Anmeldefehler');
                     toast.error(`Anmeldung fehlgeschlagen: ${error.message || 'Unbekannter Fehler'}`);
-                    console.error('Anmeldungsfehler:', error);
+                    setFormError(error.message);
                     return;
                 }
 
@@ -133,8 +123,7 @@ export default function LoginPage() {
             }
         } catch (error) {
             setLoadingState('Unerwarteter Fehler');
-            console.error('Unerwarteter Fehler:', error);
-            toast.error('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
+            setFormError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
         } finally {
             setIsLoading(false);
             setLoadingState('');

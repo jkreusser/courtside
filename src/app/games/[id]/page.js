@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -105,7 +105,6 @@ export default function GameDetailPage({ params }) {
 
                     retryCount++;
                     const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
-                    console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
 
                     await new Promise(resolve => setTimeout(resolve, delay));
 
@@ -261,6 +260,7 @@ export default function GameDetailPage({ params }) {
                     .throwOnError();
 
                 if (updateError) {
+                    console.error('🏁 Fehler beim Aktualisieren des Spielstatus:', updateError);
                     throw updateError;
                 }
 
@@ -270,6 +270,9 @@ export default function GameDetailPage({ params }) {
                     status: 'completed',
                     winner_id: winnerId
                 }));
+
+                // Überprüfe und schalte Achievements frei
+                await checkAchievements(winnerId);
 
                 toast.success('Spiel beendet!');
             }
@@ -316,6 +319,15 @@ export default function GameDetailPage({ params }) {
 
                 // Überprüfen von Siegesserien (streak) und Spielanzahl (matches)
                 await checkStreakAndMatchesAchievements();
+
+                // Überprüfen des "Perfect Match" Achievements
+                await checkPerfectMatchAchievement();
+
+                // Überprüfen des "Comeback King" Achievements
+                await checkComebackKingAchievement();
+
+                // Überprüfen des "Win Streak Breaker" Achievements
+                await checkWinStreakBreakerAchievement();
             }
 
             // Überprüfung für Tagessieger-Achievement (unabhängig davon, wer gewonnen hat)
@@ -641,6 +653,188 @@ export default function GameDetailPage({ params }) {
                 console.error('Fehler bei der Überprüfung des Underdog-Achievements:',
                     JSON.stringify(error, Object.getOwnPropertyNames(error)));
             }
+        }
+    };
+
+    // Funktion zum Überprüfen des "Perfect Match" Achievements
+    const checkPerfectMatchAchievement = async () => {
+        try {
+            // Prüfe, ob es sich um ein perfektes Spiel handelt (kein verlorener Punkt)
+            const isPerfectMatch = scores.every(score => {
+                const isPlayer1 = game.player1_id === user.id;
+                const playerScore = isPlayer1 ? score.player1_score : score.player2_score;
+                const opponentScore = isPlayer1 ? score.player2_score : score.player1_score;
+
+                // Ein perfektes Spiel bedeutet, dass der Gegner in keinem Satz einen Punkt erzielt hat
+                return opponentScore === 0 && playerScore > 0;
+            });
+
+            // Wenn es kein perfektes Spiel ist oder keine Sätze gespielt wurden, abbrechen
+            if (!isPerfectMatch || scores.length === 0) return;
+
+            // Prüfe, ob das Achievement bereits freigeschaltet ist
+            const { data: achievementData, error: achievementError } = await supabase
+                .from('player_achievements')
+                .select('achievement_id')
+                .eq('player_id', user.id)
+                .eq('achievement_id', 'perfect_match');
+
+            if (achievementError) {
+                console.error('Fehler beim Prüfen des perfect_match Achievements:', achievementError);
+                return;
+            }
+
+            // Wenn das Achievement noch nicht freigeschaltet ist, schalte es frei
+            if (!achievementData || achievementData.length === 0) {
+                const { error: unlockError } = await supabase
+                    .from('player_achievements')
+                    .insert({
+                        player_id: user.id,
+                        achievement_id: 'perfect_match',
+                        achieved_at: new Date().toISOString()
+                    });
+
+                if (unlockError) {
+                    console.error('Fehler beim Freischalten des perfect_match Achievements:', unlockError);
+                } else {
+                    toast.success('Achievement freigeschaltet: Perfektes Spiel!', { duration: 5000 });
+                }
+            }
+        } catch (error) {
+            console.error('Fehler bei der Überprüfung des Perfect Match Achievements:', error);
+        }
+    };
+
+    // Funktion zum Überprüfen des "Comeback King" Achievements
+    const checkComebackKingAchievement = async () => {
+        try {
+            // Mindestens 5 Sätze benötigt für einen 0:2 Comeback (Best-of-5)
+            if (scores.length < 3) {
+                return;
+            }
+
+            // Sortiere Sätze nach Erstellungszeit, um sie in der richtigen Reihenfolge zu haben
+            const sortedScores = [...scores].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+            // Prüfe, ob die ersten beiden Sätze verloren wurden
+            const isPlayer1 = game.player1_id === user.id;
+
+            // Prüfe die ersten beiden Sätze
+            const firstTwoSetsLost = sortedScores.length >= 2 &&
+                sortedScores.slice(0, 2).every(score => {
+                    const playerScore = isPlayer1 ? score.player1_score : score.player2_score;
+                    const opponentScore = isPlayer1 ? score.player2_score : score.player1_score;
+                    return playerScore < opponentScore;
+                });
+
+            // Prüfe, ob das Spiel trotzdem gewonnen wurde
+            if (!firstTwoSetsLost) {
+                return;
+            }
+
+            // Prüfe, ob das Achievement bereits freigeschaltet ist
+            const { data: achievementData, error: achievementError } = await supabase
+                .from('player_achievements')
+                .select('achievement_id')
+                .eq('player_id', user.id)
+                .eq('achievement_id', 'comeback_king');
+
+            if (achievementError) {
+                console.error('Fehler beim Prüfen des comeback_king Achievements:', achievementError);
+                return;
+            }
+
+            // Wenn das Achievement noch nicht freigeschaltet ist, schalte es frei
+            if (!achievementData || achievementData.length === 0) {
+                const { error: unlockError } = await supabase
+                    .from('player_achievements')
+                    .insert({
+                        player_id: user.id,
+                        achievement_id: 'comeback_king',
+                        achieved_at: new Date().toISOString()
+                    });
+
+                if (unlockError) {
+                    console.error('Fehler beim Freischalten des comeback_king Achievements:', unlockError);
+                } else {
+                    toast.success('Achievement freigeschaltet: Comeback-König!', { duration: 5000 });
+                }
+            }
+        } catch (error) {
+            console.error('Fehler bei der Überprüfung des Comeback King Achievements:', error);
+        }
+    };
+
+    // Funktion zum Überprüfen des "Win Streak Breaker" Achievements
+    const checkWinStreakBreakerAchievement = async () => {
+        try {
+            // Bestimme die ID des Gegners (Verlierer)
+            const opponentId = game.player1_id === user.id ? game.player2_id : game.player1_id;
+
+            // Hole alle Spiele des Gegners vor diesem Spiel
+            const { data: opponentGames, error: gamesError } = await supabase
+                .from('games')
+                .select('*')
+                .or(`player1_id.eq.${opponentId},player2_id.eq.${opponentId}`)
+                .lt('created_at', game.created_at)  // Nur Spiele vor diesem
+                .order('created_at', { ascending: false })  // Neueste zuerst
+                .eq('status', 'completed');
+
+            if (gamesError) {
+                console.error('Fehler beim Abrufen der Gegner-Spiele:', gamesError);
+                return;
+            }
+
+            if (!opponentGames || opponentGames.length === 0) {
+                return;
+            }
+
+            // Berechne die Siegesserie des Gegners vor diesem Spiel
+            let streak = 0;
+
+            for (const g of opponentGames) {
+                if (g.winner_id === opponentId) {
+                    streak++;
+                } else {
+                    break; // Siegesserie endet bei Niederlage
+                }
+            }
+
+            // Prüfe, ob die Siegesserie mindestens 5 war
+            if (streak < 5) {
+                return;
+            }
+
+            // Prüfe, ob das Achievement bereits freigeschaltet ist
+            const { data: achievementData, error: achievementError } = await supabase
+                .from('player_achievements')
+                .select('achievement_id')
+                .eq('player_id', user.id)
+                .eq('achievement_id', 'win_streak_breaker');
+
+            if (achievementError) {
+                console.error('Fehler beim Prüfen des win_streak_breaker Achievements:', achievementError);
+                return;
+            }
+
+            // Wenn das Achievement noch nicht freigeschaltet ist, schalte es frei
+            if (!achievementData || achievementData.length === 0) {
+                const { error: unlockError } = await supabase
+                    .from('player_achievements')
+                    .insert({
+                        player_id: user.id,
+                        achievement_id: 'win_streak_breaker',
+                        achieved_at: new Date().toISOString()
+                    });
+
+                if (unlockError) {
+                    console.error('Fehler beim Freischalten des win_streak_breaker Achievements:', unlockError);
+                } else {
+                    toast.success('Achievement freigeschaltet: Serienkiller!', { duration: 5000 });
+                }
+            }
+        } catch (error) {
+            console.error('Fehler bei der Überprüfung des Win Streak Breaker Achievements:', error);
         }
     };
 

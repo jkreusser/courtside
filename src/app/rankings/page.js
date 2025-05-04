@@ -1,14 +1,13 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { getRankings, getDailyRankings, getAvailableDates } from '@/lib/supabase';
+import { getRankings, getDailyRankings, getAvailableDates, supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Select, SelectOption } from '@/components/ui/Select';
 import toast from 'react-hot-toast';
 import { format, subDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 
 function RankingsContent() {
     const [allTimeRankings, setAllTimeRankings] = useState([]);
@@ -132,7 +131,6 @@ function RankingsContent() {
 
                     retryCount++;
                     const delay = 1000 * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
-                    console.log(`Wiederhole in ${delay}ms (${retryCount}/${maxRetries})...`);
 
                     await new Promise(resolve => setTimeout(resolve, delay));
 
@@ -375,8 +373,9 @@ function RankingsContent() {
                 <h2 className="text-xl font-semibold mb-4">Ranglisten-Information</h2>
                 <ul className="list-disc list-inside space-y-2">
                     <li>Die Rangliste wird nach <span className="text-primary font-semibold">Winrate</span> sortiert</li>
-                    <li>Bei gleicher Winrate entscheidet die <span className="font-semibold">Anzahl der Siege</span></li>
                     <li>Die Winrate wird berechnet als: <span className="font-semibold">Siege / Gespielte Spiele × 100%</span></li>
+                    <li>Bei gleicher Winrate entscheidet die <span className="font-semibold">Anzahl der Siege</span></li>
+                    <li>Bei gleicher Sieganzahl entscheiden die <span className="font-semibold">erzielten Punkte</span></li>
                 </ul>
             </div>
         </div>

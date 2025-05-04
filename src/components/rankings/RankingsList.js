@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getRankings } from '@/lib/supabase';
+import { getRankings } from '@/lib/supabase-client';
 import { useAuth } from '@/lib/auth-context';
 import { eventBus, EVENTS } from '@/lib/eventBus';
 
