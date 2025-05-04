@@ -374,7 +374,7 @@ export default function DashboardPage() {
       // Mutex-Lock in jedem Fall freigeben
       fetchLockRef.current = false;
     }
-  }, [user, authLoading, connectionStatus, playerNames, initialLoadComplete, isLoadingData, authCheckConnection, attemptReconnectLocal, updateDashboardState]);
+  }, [user, authLoading, connectionStatus, playerNames, initialLoadComplete, isLoadingData, loading, authCheckConnection, attemptReconnectLocal, updateDashboardState]);
 
   // Effect for initial loading and updates for logged-in users
   useEffect(() => {
