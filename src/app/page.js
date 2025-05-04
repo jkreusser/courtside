@@ -110,7 +110,7 @@ export default function DashboardPage() {
       setTimeout(attemptReconnectLocal, 5000);
       return false;
     }
-  }, [reconnectAttempts, checkConnection, updateDashboardState]);
+  }, [reconnectAttempts, updateDashboardState]);
 
   // Combined data fetching function to reduce separate API calls
   const fetchDashboardData = useCallback(async () => {
@@ -421,7 +421,7 @@ export default function DashboardPage() {
 
       fetchRankings();
     }
-  }, [user, authLoading, updateDashboardState, checkConnection]);
+  }, [user, authLoading, updateDashboardState]);
 
   // Memoized chart data
   const performanceData = useMemo(() => {
