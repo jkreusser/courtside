@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Avatar from '@/components/ui/Avatar';
+import { GameCardSkeleton, TableRowSkeleton } from '@/components/ui/loading-skeletons';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -307,7 +308,33 @@ function GamesPageContent() {
                 </CardHeader>
                 <CardContent>
                     {loading ? (
-                        <div className="text-center py-8">Lade Spiele...</div>
+                        <>
+                            {/* Mobile Skeleton */}
+                            <div className="md:hidden space-y-4">
+                                {Array.from({ length: 5 }).map((_, index) => (
+                                    <GameCardSkeleton key={index} />
+                                ))}
+                            </div>
+                            {/* Desktop Skeleton */}
+                            <div className="hidden md:block overflow-x-auto">
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="border-b border-zinc-800">
+                                            <th className="text-left py-3 px-4">Spieler</th>
+                                            <th className="text-left py-3 px-4">Ergebnis</th>
+                                            <th className="text-left py-3 px-4">Format</th>
+                                            <th className="text-left py-3 px-4">Status</th>
+                                            <th className="text-left py-3 px-4">Datum</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {Array.from({ length: 5 }).map((_, index) => (
+                                            <TableRowSkeleton key={index} columns={5} />
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </>
                     ) : filteredGames.length === 0 ? (
                         <div className="text-center py-8 text-zinc-500">
                             Keine Spiele gefunden.

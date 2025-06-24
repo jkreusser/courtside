@@ -5,6 +5,7 @@ import { supabase, checkConnection, getRankings } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Avatar from '@/components/ui/Avatar';
+import { DashboardSkeleton, ChartSkeleton, RankingsTableSkeleton, GameCardSkeleton } from '@/components/ui/loading-skeletons';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import toast from 'react-hot-toast';
@@ -46,7 +47,11 @@ const StableLoadingState = ({ isLoading, children, minLoadingTime = 800 }) => {
   }, [isLoading, minLoadingTime]);
 
   return showLoading ? (
-    <div className="text-center py-8">Lade Spiele...</div>
+    <div className="space-y-4">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <GameCardSkeleton key={index} />
+      ))}
+    </div>
   ) : children;
 };
 
@@ -453,7 +458,7 @@ export default function DashboardPage() {
 
   // Handle auth loading with consistent UI
   if (authLoading) {
-    return <div className="text-center py-8">Lade...</div>;
+    return <DashboardSkeleton />;
   }
 
   // For non-logged-in users: Welcome page with login button
@@ -539,7 +544,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="text-center py-8">Lade Rangliste...</div>
+              <RankingsTableSkeleton rows={5} />
             ) : error ? (
               <div className="text-center py-8 text-red-600">{error}</div>
             ) : rankings.length === 0 ? (
@@ -732,7 +737,7 @@ export default function DashboardPage() {
                 >
                   <defs>
                     <linearGradient id="winrateGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#0d2a18" stopOpacity={0.7} />
+                      <stop offset="0%" stopColor="#0d2a18" stopOpacity={0.8} />
                       <stop offset="100%" stopColor="#0d2a18" stopOpacity={0.2} />
                     </linearGradient>
                   </defs>
@@ -825,7 +830,7 @@ export default function DashboardPage() {
                 >
                   <defs>
                     <linearGradient id="fillPunkteDifferenz" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#0d2a18" stopOpacity={0.7} />
+                      <stop offset="0%" stopColor="#0d2a18" stopOpacity={0.8} />
                       <stop offset="100%" stopColor="#0d2a18" stopOpacity={0.2} />
                     </linearGradient>
                   </defs>

@@ -67,6 +67,13 @@ Die Avatar-Komponente und Upload-Funktionalität waren bereits vollständig impl
 - [ ] Winrate-Graph: Transparenz von 0.4/0.1 auf 0.7/0.2 erhöhen
 - [ ] Punktedifferenz-Graph: Transparenz von 0.4/0.1 auf 0.7/0.2 erhöhen
 
+### Phase 9: Loading & Performance-Optimierungen 🚀
+- [ ] Skeleton Loading & Better UX 🎨
+- [ ] Advanced Caching & State Management 💾
+- [ ] Bundle-Optimierung & Code-Splitting 📦
+- [ ] Database & Query-Optimierung 🗄️
+- [ ] Mobile Performance 📱
+
 ## Project Status Board
 
 | Task | Status | Notes |
@@ -132,4 +139,90 @@ Alle gewünschten Avatar-Integrationen sind implementiert und getestet!
 - Responsive Design erfordert unterschiedliche Layouts für Mobile und Desktop ✅
 - Konsistente UI-Patterns zwischen ähnlichen Komponenten verbessern die UX ✅
 - Desktop-Tabellen profitieren von mehr vertikalem Abstand für bessere Lesbarkeit ✅
-- Umfassende Avatar-Integration schafft eine professionelle, benutzerfreundliche App-Erfahrung ✅ 
+- Umfassende Avatar-Integration schafft eine professionelle, benutzerfreundliche App-Erfahrung ✅
+
+# CourtSide - Loading & Performance-Optimierungen - Phase 9 🚀
+
+## Background and Motivation
+
+Der Benutzer möchte die Loading-Zustände und Performance der CourtSide-App optimieren. Basierend auf der Code-Analyse wurden mehrere Verbesserungsbereiche identifiziert:
+
+1. **Loading States**: Bessere UX mit Skeleton Loading statt einfacher Spinner
+2. **Caching**: Erweiterte Caching-Strategien für Rankings und Spielerdaten  
+3. **Bundle-Optimierung**: Code-Splitting und Lazy Loading
+4. **Database-Performance**: Query-Optimierung und Batch-Operations
+5. **Mobile Performance**: Spezielle Optimierungen für Mobile-Geräte
+
+## Key Challenges and Analysis
+
+### 1. **Loading States & UX**
+- Aktuell: Einfache "Lade..." Texte überall
+- Problem: Flackernde UI, schlechte UX bei langsamen Verbindungen
+- Lösung: Skeleton Loading, Progressive Loading, Optimierte Loading-Zeiten
+
+### 2. **Performance-Bottlenecks**
+- Database-Queries ohne Limitierung
+- Fehlende Caching-Mechanismen
+- Bundle-Size-Optimierung erforderlich
+- Mobile Performance verbesserungsfähig
+
+## High-level Task Breakdown
+
+### **Phase 9A: Skeleton Loading Implementation** ✅
+1. Shadcn Skeleton-Komponente installieren ✅
+2. Erweiterte Skeleton-Komponenten erstellen ✅
+3. Dashboard Loading-States ersetzen ✅
+4. Spiele-Übersicht Loading-States ersetzen ✅
+5. Weitere Seiten mit Skeleton Loading ausstatten
+6. Loading-Zeiten optimieren
+
+### **Phase 9B: Caching & Performance**
+1. React Query/SWR für Daten-Caching implementieren
+2. Database-Query-Optimierung
+3. Image-Loading-Optimierung
+4. Bundle-Size-Analyse und Code-Splitting
+
+### **Phase 9C: Mobile & UX Optimierungen**
+1. Mobile-spezifische Performance-Optimierungen
+2. Progressive Web App (PWA) Features erweitern
+3. Offline-Funktionalitäten verbessern
+
+## Project Status Board - Phase 9A
+
+| Task | Status | Notes |
+|------|--------|-------|
+| **SKELETON LOADING IMPLEMENTATION** | | |
+| Shadcn Skeleton-Komponente installieren | ✅ Done | Official shadcn/ui skeleton installiert |
+| Erweiterte Skeleton-Komponenten erstellen | ✅ Done | loading-skeletons.jsx mit spezialisierten Komponenten |
+| Dashboard Rankings-Tabelle | ✅ Done | RankingsTableSkeleton implementiert |
+| Dashboard Spiele-Liste | ✅ Done | GameCardSkeleton in StableLoadingState |
+| Spiele-Übersicht Mobile | ✅ Done | GameCardSkeleton für Mobile-Ansicht |
+| Spiele-Übersicht Desktop | ✅ Done | TableRowSkeleton für Desktop-Tabelle |
+| Rankings-Seite Loading | 🔄 In Progress | Nächster Schritt |
+| Spieldetail-Seite Loading | 🔄 In Progress | Nächster Schritt |
+| Spiel erstellen Loading | 🔄 In Progress | Nächster Schritt |
+
+## Executor's Feedback or Assistance Requests
+
+**✅ ERFOLGREICHE IMPLEMENTIERUNG:**
+- Shadcn Skeleton-Komponente erfolgreich installiert und integriert
+- Erweiterte Skeleton-Komponenten für verschiedene UI-Patterns erstellt
+- Dashboard und Spiele-Übersicht mit professionellen Loading-States ausgestattet
+- Responsive Design: Unterschiedliche Skeletons für Mobile/Desktop
+
+**🎯 NÄCHSTE SCHRITTE:**
+1. Rankings-Seite, Spieldetail-Seite und weitere Bereiche mit Skeleton Loading ausstatten
+2. Performance-Optimierungen: Caching-Strategien implementieren
+3. Bundle-Size-Analyse und Code-Splitting
+
+## Lessons
+
+1. **Shadcn Integration**: Offizielle Shadcn-Komponenten sind immer besser als eigene Implementierungen
+2. **Responsive Skeletons**: Verschiedene Skeleton-Layouts für Mobile/Desktop verbessern die UX erheblich
+3. **Spezifische Skeleton-Komponenten**: GameCardSkeleton, TableRowSkeleton etc. sind wiederverwendbar und konsistent
+4. **Loading-State-Hierarchie**: StableLoadingState + Skeleton Loading bietet optimale UX
+
+**📊 PHASE 9A STATUS:**
+- Skeleton Loading erfolgreich in Dashboard und Spiele-Übersicht implementiert
+- Professionelle Loading-States statt einfacher "Lade..."-Texte
+- Bereit für weitere Performance-Optimierungen 
