@@ -1138,7 +1138,14 @@ export default function GameDetailPage({ params }) {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <label htmlFor="player1_score" className="block text-sm font-medium">
-                                        {players.player1?.name}
+                                        <div className="flex items-center gap-2">
+                                            <Avatar
+                                                src={players.player1?.avatar_url}
+                                                name={players.player1?.name}
+                                                size="xs"
+                                            />
+                                            {players.player1?.name}
+                                        </div>
                                     </label>
                                     <Input
                                         id="player1_score"
@@ -1151,7 +1158,14 @@ export default function GameDetailPage({ params }) {
                                 </div>
                                 <div className="space-y-2">
                                     <label htmlFor="player2_score" className="block text-sm font-medium">
-                                        {players.player2?.name}
+                                        <div className="flex items-center gap-2">
+                                            <Avatar
+                                                src={players.player2?.avatar_url}
+                                                name={players.player2?.name}
+                                                size="xs"
+                                            />
+                                            {players.player2?.name}
+                                        </div>
                                     </label>
                                     <Input
                                         id="player2_score"

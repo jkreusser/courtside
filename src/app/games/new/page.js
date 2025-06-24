@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import Avatar from '@/components/ui/Avatar';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -35,7 +36,7 @@ export default function NewGamePage() {
 
                 const { data, error } = await supabase
                     .from('players')
-                    .select('*')
+                    .select('id, name, avatar_url')
                     .neq('id', user.id)
                     .order('name');
 
@@ -228,14 +229,21 @@ export default function NewGamePage() {
                                 <div
                                     key={player.id}
                                     className={`
-p-4 border rounded-lg cursor-pointer
+p-4 border rounded-lg cursor-pointer transition-all hover:shadow-md
 ${selectedPlayerId === player.id
                                             ? 'bg-primary/10 border-primary'
                                             : 'hover:border-primary'}
 `}
                                     onClick={() => setSelectedPlayerId(player.id)}
                                 >
-                                    <div className="font-medium">{player.name}</div>
+                                    <div className="flex items-center gap-3">
+                                        <Avatar
+                                            src={player.avatar_url}
+                                            name={player.name}
+                                            size="md"
+                                        />
+                                        <div className="font-medium">{player.name}</div>
+                                    </div>
                                 </div>
                             ))}
                         </div>
