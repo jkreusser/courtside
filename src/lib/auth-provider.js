@@ -131,6 +131,41 @@ export function AuthProvider({ children }) {
             if (mounted) {
                 console.log('[Auth] 🔑 Auth-Event:', event);
                 setLastAuthEvent(event);
+
+                // KRITISCHER SCHUTZ: Prüfe auf gelöschte Benutzer (nur wenn Profil existiert)
+                if (event === 'SIGNED_IN' && currentSession?.user) {
+                    try {
+                        console.log('[Auth] Prüfe auf gelöschten Benutzer...');
+
+                        // Prüfe ob Player gelöscht ist (mit fehlertoleranter Abfrage)
+                        const { data: players, error } = await supabase
+                            .from('players')
+                            .select('deleted_at, name')
+                            .eq('id', currentSession.user.id)
+                            .limit(1);
+
+                        // Nur bei schwerwiegenden Fehlern (nicht bei "nicht gefunden")
+                        if (error && error.code !== 'PGRST116' && error.code !== 'PGRST301') {
+                            console.error('[Auth] Fehler beim Prüfen des Players:', error);
+                            return; // Fehler ignorieren, Login fortsetzen
+                        }
+
+                        const profile = players?.[0];
+
+                        // Wenn Profil existiert und gelöscht ist, Benutzer ausloggen
+                        if (profile && (profile.deleted_at || profile.name === '[Gelöschter Benutzer]')) {
+                            console.warn('[Auth] 🚨 Gelöschter Benutzer versucht Login - Abmeldung erzwungen');
+                            await supabaseSignOut();
+                            alert('Dieser Account wurde gelöscht und ist nicht mehr verfügbar.');
+                            router.push('/');
+                            return;
+                        }
+                    } catch (error) {
+                        console.error('[Auth] Fehler bei gelöschter Benutzer Prüfung:', error);
+                        // Fehler ignorieren und Login fortsetzen
+                    }
+                }
+
                 setSession(currentSession);
                 setUser(currentSession?.user || null);
                 setLoading(false);

@@ -8,7 +8,8 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area } from 'recharts';
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, Cell, ComposedChart } from 'recharts';
+import { ChartContainer as ShadcnChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Info } from 'lucide-react';
 
 // Chart component with fallback that loads charts more efficiently
@@ -406,26 +407,18 @@ export default function DashboardPage() {
             return;
           }
 
-          // Hole die Rankings direkt aus der Supabase Client-Funktion, 
-          // die bereits Spielernamen enthält und richtige Punktzählung nutzt
-          const { data: rankingsData, error: rankingsError } = await supabase
-            .from('rankings_view')
-            .select('*')
-            .order('win_percentage', { ascending: false })
-            .limit(5);
+          // Verwende direkt die getRankings-Funktion für bessere Fehlerbehandlung
+          const { data: rankingsData, error: rankingsError } = await getRankings(false, 5);
 
           if (rankingsError) {
-            console.error('Fehler bei Rankings-Abfrage:', rankingsError);
-            // Fallback zur Client-Funktion, wenn die View nicht funktioniert
-            const { data: calculatedRankings, error } = await getRankings(false, 5);
-
-            if (error) throw error;
-
-            updateDashboardState({
-              rankings: calculatedRankings || [],
-              loading: false
+            console.error('Fehler bei Rankings-Abfrage:', {
+              message: rankingsError.message,
+              details: rankingsError.details,
+              hint: rankingsError.hint,
+              code: rankingsError.code,
+              full_error: rankingsError
             });
-            return;
+            throw rankingsError;
           }
 
           updateDashboardState({
@@ -705,15 +698,26 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="h-64">
             {games.length >= 3 && performanceData.length >= 2 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
+              <ShadcnChartContainer
+                config={{
+                  winrate: {
+                    label: "Winrate",
+                    color: "#10b981",
+                  },
+                }}
+                className="w-full h-full"
+              >
+                <AreaChart
                   data={performanceData}
+                  width={690}
+                  height={256}
                   margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
                 >
                   <defs>
-                    <filter id="shadow" height="200%">
-                      <feDropShadow dx="0" dy="3" stdDeviation="3" floodOpacity="0.1" />
-                    </filter>
+                    <linearGradient id="winrateGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#0d2a18" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="#0d2a18" stopOpacity={0.1} />
+                    </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
                   <XAxis
@@ -727,39 +731,34 @@ export default function DashboardPage() {
                     tickLine={{ stroke: '#4b5563' }}
                     axisLine={{ stroke: '#4b5563' }}
                     tickFormatter={(value) => `${Math.round(value * 100)}%`}
-                    domain={[0, 1]} // Fest auf 0% bis 100% setzen
+                    domain={[0, 1]}
                   />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1c1c1e',
-                      borderColor: '#2c2c2e',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-                      color: '#e5e7eb'
-                    }}
-                    itemStyle={{ color: '#e5e7eb' }}
-                    formatter={(value, name) => {
-                      if (name === 'winrate') return [`${Math.round(value * 100)}%`, 'Winrate'];
-                      return [value, name];
-                    }}
-                    labelStyle={{ color: '#e5e7eb', fontWeight: 'bold', marginBottom: '5px' }}
+                  <ChartTooltip
+                    content={
+                      <ChartTooltipContent
+                        formatter={(value, name) => {
+                          if (name === 'winrate') return [`${Math.round(value * 100)}% `, 'Winrate'];
+                          return [value, name];
+                        }}
+                      />
+                    }
                   />
-                  <Line
+                  <Area
                     type="monotone"
                     dataKey="winrate"
                     stroke="#10b981"
                     strokeWidth={3}
+                    fill="url(#winrateGradient)"
                     dot={{ stroke: '#10b981', strokeWidth: 2, r: 4, fill: '#1c1c1e' }}
                     activeDot={{ r: 6, stroke: '#059669', strokeWidth: 2, fill: '#10b981' }}
-                    name="Winrate"
                     connectNulls={true}
                     animationDuration={500}
                     animationBegin={0}
                     animationEasing="ease-out"
                     isAnimationActive={true}
                   />
-                </LineChart>
-              </ResponsiveContainer>
+                </AreaChart>
+              </ShadcnChartContainer>
             ) : (
               <div className="flex flex-col h-full items-center justify-center text-center text-zinc-500">
                 <p className="mb-2">Noch nicht genügend Spiele für Statistiken.</p>
@@ -779,65 +778,110 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="h-64">
             {games.length >= 3 && pointDifferenceData.length >= 3 ? (
-              <ChartContainer>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={pointDifferenceData}
-                    margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
-                  >
-                    <defs>
-                      <filter id="shadow" height="200%">
-                        <feDropShadow dx="0" dy="3" stdDeviation="3" floodOpacity="0.1" />
-                      </filter>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
-                    <XAxis
-                      dataKey="gameNumber"
-                      tick={{ fill: '#9ca3af', fontSize: 12 }}
-                      tickLine={{ stroke: '#4b5563' }}
-                      axisLine={{ stroke: '#4b5563' }}
-                      label={{ value: 'Spiel #', position: 'insideBottomRight', offset: -5, fill: '#9ca3af' }}
-                    />
-                    <YAxis
-                      tick={{ fill: '#9ca3af', fontSize: 12 }}
-                      tickLine={{ stroke: '#4b5563' }}
-                      axisLine={{ stroke: '#4b5563' }}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#1c1c1e',
-                        borderColor: '#2c2c2e',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-                        color: '#e5e7eb'
-                      }}
-                      itemStyle={{ color: '#e5e7eb' }}
-                      formatter={(value, name) => {
-                        if (name === 'punkteDifferenz') return [value, 'Punktedifferenz'];
-                        return [value, name];
-                      }}
-                      labelFormatter={(value) => `Spiel #${value}`}
-                      labelStyle={{ color: '#e5e7eb', fontWeight: 'bold', marginBottom: '5px' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="punkteDifferenz"
-                      stroke="#10b981"
-                      strokeWidth={3}
-                      dot={{ stroke: '#10b981', strokeWidth: 2, r: 4, fill: '#1c1c1e' }}
-                      activeDot={{ r: 6, stroke: '#059669', strokeWidth: 2, fill: '#10b981' }}
-                      name="Punktedifferenz"
-                      filter="url(#shadow)"
-                      fillOpacity={0.3}
-                      fill="#0A100E"
-                      animationDuration={0} // Reduce animation for less flicker
-                      animationBegin={0}
-                      animationEasing="ease-out"
-                      isAnimationActive={false} // Disable animation completely
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartContainer>
+              <ShadcnChartContainer
+                config={{
+                  punkteDifferenz: {
+                    label: "Punktedifferenz",
+                    color: "#10b981",
+                  },
+                }}
+                className="w-full h-full"
+              >
+                <ComposedChart
+                  width={690}
+                  height={256}
+                  data={(() => {
+                    if (pointDifferenceData.length === 0) return [];
+                    const minValue = Math.min(...pointDifferenceData.map(d => d.punkteDifferenz));
+                    const maxValue = Math.max(...pointDifferenceData.map(d => d.punkteDifferenz));
+                    const range = maxValue - minValue;
+                    const bottomPadding = range * 0.1; // 10% Padding unten
+                    const bottom = minValue - bottomPadding;
+
+                    return pointDifferenceData.map(item => ({
+                      ...item,
+                      punkteDifferenzShifted: item.punkteDifferenz - bottom,
+                      bottom: 0
+                    }));
+                  })()}
+                  margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
+                >
+                  <defs>
+                    <linearGradient id="fillPunkteDifferenz" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#0d2a18" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="#0d2a18" stopOpacity={0.1} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
+                  <XAxis
+                    dataKey={pointDifferenceData.length > 0 && pointDifferenceData[0].aggregationType === 'tag' ? 'datum' : 'gameNumber'}
+                    tick={{ fill: '#9ca3af', fontSize: 12 }}
+                    tickLine={{ stroke: '#4b5563' }}
+                    axisLine={{ stroke: '#4b5563' }}
+                    tickFormatter={(value) => typeof value === 'string' ? value.slice(0, 3) : value}
+                  />
+                  <YAxis
+                    tick={{ fill: '#9ca3af', fontSize: 12 }}
+                    tickLine={{ stroke: '#4b5563' }}
+                    axisLine={{ stroke: '#4b5563' }}
+                    tickFormatter={(value) => {
+                      if (pointDifferenceData.length === 0) return value;
+                      const minValue = Math.min(...pointDifferenceData.map(d => d.punkteDifferenz));
+                      const range = Math.max(...pointDifferenceData.map(d => d.punkteDifferenz)) - minValue;
+                      const bottomPadding = range * 0.1;
+                      const bottom = minValue - bottomPadding;
+                      return Math.round(value + bottom);
+                    }}
+                  />
+                  <ChartTooltip
+                    content={
+                      <ChartTooltipContent
+                        formatter={(value, name, props) => {
+                          if (name === 'punkteDifferenzShifted') {
+                            const actualValue = props.payload.punkteDifferenz;
+                            const aggregationType = props.payload.aggregationType;
+                            const gamesCount = props.payload.gamesCount;
+
+                            if (aggregationType === 'tag' && gamesCount) {
+                              return [`${actualValue} `, `Punktedifferenz (${gamesCount} Spiele)`];
+                            }
+                            return [`${actualValue} `, 'Punktedifferenz'];
+                          }
+                          return [`${value} `, name];
+                        }}
+                        labelFormatter={(value, payload) => {
+                          if (payload && payload.length > 0) {
+                            const data = payload[0].payload;
+                            const aggregationType = data.aggregationType;
+                            const datum = data.datum;
+
+                            if (aggregationType === 'tag') {
+                              return datum;
+                            } else {
+                              return `Spiel #${data.gameNumber} (${datum})`;
+                            }
+                          }
+                          return `Spiel #${value}`;
+                        }}
+                      />
+                    }
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="punkteDifferenzShifted"
+                    stroke="#10b981"
+                    strokeWidth={3}
+                    fill="url(#fillPunkteDifferenz)"
+                    dot={{ stroke: '#10b981', strokeWidth: 2, r: 4, fill: '#1c1c1e' }}
+                    activeDot={{ r: 6, stroke: '#059669', strokeWidth: 2, fill: '#10b981' }}
+                    connectNulls={true}
+                    animationDuration={500}
+                    animationBegin={0}
+                    animationEasing="ease-out"
+                    isAnimationActive={true}
+                  />
+                </ComposedChart>
+              </ShadcnChartContainer>
             ) : (
               <div className="flex flex-col h-full items-center justify-center text-center text-zinc-500">
                 <p className="mb-2">Noch nicht genügend Spiele für Statistiken.</p>
@@ -940,7 +984,7 @@ function getWeekNumber(date) {
   return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 }
 
-// Funktion zur Generierung der Punktedifferenz-Daten nach Spielzahl
+// Funktion zur Generierung der Punktedifferenz-Daten (intelligent aggregiert)
 function generatePointDifferenceData(games, userId) {
   if (!games || !games.length) return [];
 
@@ -949,44 +993,106 @@ function generatePointDifferenceData(games, userId) {
     new Date(a.created_at) - new Date(b.created_at)
   );
 
-  // Erstelle die Daten für das Diagramm
-  const chartData = sortedGames.map((game, index) => {
-    // Berechne Punktedifferenz für den aktuellen Spieler
-    let pointDiff = 0;
-    if (game.scores && game.scores.length) {
-      const isPlayer1 = game.player1_id === userId;
+  // Schwellenwert für Aggregation: Ab 15 Spielen wird nach Tagen aggregiert
+  const AGGREGATION_THRESHOLD = 15;
 
-      game.scores.forEach(score => {
-        if (isPlayer1) {
-          pointDiff += score.player1_score - score.player2_score;
-        } else {
-          pointDiff += score.player2_score - score.player1_score;
+  if (sortedGames.length <= AGGREGATION_THRESHOLD) {
+    // Wenige Spiele: Zeige jedes Spiel einzeln
+    const chartData = sortedGames.map((game, index) => {
+      // Berechne Punktedifferenz für den aktuellen Spieler
+      let pointDiff = 0;
+      if (game.scores && game.scores.length) {
+        const isPlayer1 = game.player1_id === userId;
+
+        game.scores.forEach(score => {
+          if (isPlayer1) {
+            pointDiff += score.player1_score - score.player2_score;
+          } else {
+            pointDiff += score.player2_score - score.player1_score;
+          }
+        });
+      }
+
+      return {
+        gameNumber: index + 1,
+        punkteDifferenz: pointDiff,
+        datum: new Date(game.created_at).toLocaleDateString('de-DE', {
+          month: 'short',
+          day: 'numeric'
+        }),
+        aggregationType: 'spiel'
+      };
+    });
+
+    // Stelle sicher, dass mindestens drei Datenpunkte vorhanden sind
+    if (chartData.length < 3) {
+      const lastPoint = chartData[chartData.length - 1];
+      while (chartData.length < 3) {
+        chartData.push({
+          ...lastPoint,
+          gameNumber: chartData.length + 1,
+          punkteDifferenz: lastPoint?.punkteDifferenz || 0,
+          datum: 'Heute'
+        });
+      }
+    }
+
+    return chartData;
+  } else {
+    // Viele Spiele: Aggregiere nach Spieltagen
+    const gamesByDate = {};
+
+    sortedGames.forEach(game => {
+      const gameDate = new Date(game.created_at);
+      const dateKey = gameDate.toISOString().split('T')[0]; // YYYY-MM-DD
+
+      if (!gamesByDate[dateKey]) {
+        gamesByDate[dateKey] = {
+          games: [],
+          displayDate: gameDate.toLocaleDateString('de-DE', {
+            month: 'short',
+            day: 'numeric'
+          }),
+          timestamp: gameDate.getTime()
+        };
+      }
+
+      gamesByDate[dateKey].games.push(game);
+    });
+
+    // Sortiere die Tage chronologisch
+    const sortedDays = Object.values(gamesByDate).sort((a, b) => a.timestamp - b.timestamp);
+
+    // Erstelle aggregierte Daten für jeden Spieltag
+    const chartData = sortedDays.map((dayData, index) => {
+      let totalPointDiff = 0;
+      let gamesCount = 0;
+
+      // Berechne die Gesamtpunktedifferenz für den Tag
+      dayData.games.forEach(game => {
+        if (game.scores && game.scores.length) {
+          const isPlayer1 = game.player1_id === userId;
+
+          game.scores.forEach(score => {
+            if (isPlayer1) {
+              totalPointDiff += score.player1_score - score.player2_score;
+            } else {
+              totalPointDiff += score.player2_score - score.player1_score;
+            }
+          });
         }
+        gamesCount++;
       });
-    }
 
-    return {
-      gameNumber: index + 1,
-      punkteDifferenz: pointDiff,
-      datum: new Date(game.created_at).toLocaleDateString('de-DE', {
-        month: 'short',
-        day: 'numeric'
-      })
-    };
-  });
+      return {
+        gameNumber: index + 1,
+        punkteDifferenz: totalPointDiff,
+        datum: dayData.displayDate,
+        gamesCount: gamesCount,
+        aggregationType: 'tag'
+      };
+    });
 
-  // Stelle sicher, dass mindestens drei Datenpunkte vorhanden sind
-  if (chartData.length < 3) {
-    const lastPoint = chartData[chartData.length - 1];
-    while (chartData.length < 3) {
-      chartData.push({
-        ...lastPoint,
-        gameNumber: chartData.length + 1,
-        punkteDifferenz: lastPoint.punkteDifferenz,
-        datum: 'Heute'
-      });
-    }
+    return chartData;
   }
-
-  return chartData;
 }

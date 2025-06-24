@@ -369,7 +369,7 @@ function RankingsContent() {
                 </Card>
             </div>
 
-            <div className="p-6 rounded-lg mt-8 border border-zinc-800">
+            <div className="p-6 rounded-lg mt-8 border border-zinc-800 bg-card">
                 <h2 className="text-xl font-semibold mb-4">Ranglisten-Information</h2>
                 <ul className="list-disc list-inside space-y-2">
                     <li>Die Rangliste wird nach <span className="text-primary font-semibold">Winrate</span> sortiert</li>

@@ -82,7 +82,7 @@ export async function checkAdmin() {
     }
 
     const { data } = await supabase
-        .from('profiles')
+        .from('players')
         .select('role')
         .eq('id', session.user.id)
         .single();

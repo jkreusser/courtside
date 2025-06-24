@@ -77,7 +77,7 @@ export async function middleware(request) {
         let isAdmin = false;
         if (session?.user) {
             const { data } = await supabase
-                .from('profiles')
+                .from('players')
                 .select('role')
                 .eq('id', session.user.id)
                 .single();

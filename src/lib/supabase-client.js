@@ -108,21 +108,22 @@ export async function createUserWithAccessCode(email, name, accessCode, role = '
             throw authError;
         }
 
-        // Benutzer in der Profile-Tabelle erstellen
+        // Benutzer in der Players-Tabelle erstellen (vereinfacht - nur noch eine Tabelle!)
         if (authData?.user) {
-            const { error: profileError } = await supabase
-                .from('profiles')
+            const { error: playerError } = await supabase
+                .from('players')
                 .insert({
                     id: authData.user.id,
                     name,
+                    email,
                     role: role || 'player'
                 });
 
-            if (profileError) {
-                console.error('Profile-Erstellungsfehler:', profileError);
+            if (playerError) {
+                console.error('Player-Erstellungsfehler:', playerError);
                 return {
                     data: authData,
-                    error: { message: 'Benutzer erstellt, aber Profilfehler: ' + profileError.message }
+                    error: { message: 'Benutzer erstellt, aber Player-Fehler: ' + playerError.message }
                 };
             }
         }
@@ -146,7 +147,7 @@ export async function signOut() {
 
 export async function getUserRole(userId) {
     const { data, error } = await supabase
-        .from('profiles')
+        .from('players')
         .select('role')
         .eq('id', userId)
         .single();
@@ -187,7 +188,7 @@ export async function reconnectSupabase() {
 export async function getProfile(userId) {
     try {
         const { data, error } = await supabase
-            .from('profiles')
+            .from('players')
             .select('*')
             .eq('id', userId)
             .single();
@@ -204,7 +205,7 @@ export async function getProfile(userId) {
 export async function updateProfile(userId, updates) {
     try {
         const { data, error } = await supabase
-            .from('profiles')
+            .from('players')
             .update(updates)
             .eq('id', userId)
             .select()
@@ -495,8 +496,8 @@ export async function getDailyRankings(date, useCache = true, limit = 50) {
             if (b.games_won !== a.games_won) {
                 return b.games_won - a.games_won;
             }
-            // Tertiär nach Punkten
-            return b.total_points - a.total_points;
+            // Tertiär nach Punkten (bei Tagesrangliste sind es daily_points)
+            return b.daily_points - a.daily_points;
         });
 
         // Auf Limit beschränken
@@ -652,5 +653,51 @@ export async function getPlayers(useCache = true) {
     } catch (error) {
         console.error('Fehler beim Abrufen der Spieler:', error);
         return { data: null, error };
+    }
+}
+
+// Profil vollständig löschen (inklusive aller Spieldaten und Auth-User)
+export async function deleteProfile(userId) {
+    try {
+        // Hole das aktuelle Auth-Token
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+            throw new Error('Nicht angemeldet');
+        }
+
+        console.log('🗑️ Starting complete profile deletion...');
+
+        // Verwende die neue vollständige Lösch-Function
+        const { data, error } = await supabase.functions.invoke('delete-user-complete', {
+            headers: {
+                Authorization: `Bearer ${session.access_token}`,
+            },
+        });
+
+        if (error) {
+            console.error('Edge Function error:', error);
+            throw error;
+        }
+
+        if (!data.success) {
+            console.error('Deletion failed:', data);
+            throw new Error(data.error || data.details || 'Unbekannter Fehler beim Löschen');
+        }
+
+        console.log('✅ Profile deletion successful:', data.deletionSummary);
+
+        // Cache invalidieren
+        invalidateCache();
+
+        return {
+            success: true,
+            error: null,
+            message: data.message,
+            deletionSummary: data.deletionSummary
+        };
+    } catch (error) {
+        console.error('Fehler beim Löschen des Profils:', error);
+        return { success: false, error };
     }
 } 

@@ -317,7 +317,7 @@ export default function AchievementsPage() {
 
                 {user && (
                     <div className="mb-6">
-                        <div className="flex justify-between items-center mb-2">
+                        <div className="flex justify-between items-center mb-1">
                             <span className="text-sm font-medium">Fortschritt: {stats.achieved} von {stats.total} freigeschaltet</span>
                             <span className="text-sm font-medium">{Math.round(progressPercentage)}%</span>
                         </div>
@@ -340,13 +340,13 @@ export default function AchievementsPage() {
                     {achievements.map((achievement) => (
                         <Card
                             key={achievement.id}
-                            className={`overflow-hidden border-2 transition-all duration-300 ${achievement.achieved
-                                ? 'border-primary ' + achievement.backgroundColor
-                                : 'border-zinc-700 bg-zinc-900 opacity-75'
+                            className={`h-64 flex flex-col overflow-hidden transition-all duration-300 ${achievement.achieved
+                                ? 'border-zinc-700'
+                                : 'border-zinc-700 opacity-75'
                                 }`}
                         >
-                            <CardHeader className="pb-3 relative">
-                                <div className="flex items-center justify-between mb-2">
+                            <CardHeader className="pb-3 flex-shrink-0">
+                                <div className="flex items-center justify-between mb-3">
                                     <div className={`p-2.5 rounded-full ${achievement.achieved
                                         ? 'bg-secondary text-primary'
                                         : 'bg-zinc-800 text-zinc-400'
@@ -355,37 +355,50 @@ export default function AchievementsPage() {
                                         {achievement.icon}
                                     </div>
                                     {achievement.achieved ? (
-                                        <div className="rounded-full p-1">
+                                        <div className="rounded-full">
                                             <CheckCircleIcon className="h-6 w-6 text-primary" />
                                         </div>
                                     ) : (
                                         <LockClosedIcon className="h-5 w-5 text-zinc-500" />
                                     )}
                                 </div>
-                                <CardTitle className={achievement.achieved ? 'text-primary' : 'text-zinc-400'}>
+                                <CardTitle className={`text-lg ${achievement.achieved ? 'text-primary' : 'text-zinc-400'}`}>
                                     {achievement.title || achievement.name}
                                 </CardTitle>
-                                <CardDescription className={achievement.achieved ? 'text-zinc-300' : 'text-zinc-500'}>
+                                <CardDescription className={`text-sm line-clamp-2 ${achievement.achieved ? 'text-zinc-300' : 'text-zinc-500'}`}>
                                     {achievement.description}
                                 </CardDescription>
                             </CardHeader>
-                            {achievement.threshold && (
-                                <CardContent className="pt-0 pb-3">
-                                    <div className="w-full bg-zinc-700 rounded-full h-1.5 mt-1">
-                                        <div
-                                            className={`${achievement.achieved ? 'bg-primary' : 'bg-secondary'} h-1.5 rounded-full`}
-                                            style={{ width: achievement.achieved ? '100%' : '0%' }}
-                                        ></div>
-                                    </div>
+
+                            {/* Spacer zum Ausfüllen des verfügbaren Platzes */}
+                            <div className="flex-grow flex flex-col justify-end">
+                                {/* Progress Bar - immer vorhanden, aber manchmal unsichtbar */}
+                                <CardContent className="pt-0 pb-2 flex-shrink-0">
+                                    {achievement.threshold ? (
+                                        <div className="w-full bg-zinc-700 rounded-full h-1.5">
+                                            <div
+                                                className={`${achievement.achieved ? 'bg-primary' : 'bg-secondary'} h-1.5 rounded-full`}
+                                                style={{ width: achievement.achieved ? '100%' : '0%' }}
+                                            ></div>
+                                        </div>
+                                    ) : (
+                                        <div className="h-1.5"></div> /* Spacer für einheitliche Höhe */
+                                    )}
                                 </CardContent>
-                            )}
-                            {achievement.achieved && (
-                                <CardFooter className="pt-0 pb-4">
-                                    <p className="text-xs text-zinc-400">
-                                        Freigeschaltet am {new Date(achievement.achievedAt).toLocaleDateString('de-DE')}
-                                    </p>
+
+                                {/* Footer - immer vorhanden, aber manchmal leer */}
+                                <CardFooter className="pt-1 pb-3 flex-shrink-0 min-h-[2.5rem] flex items-end">
+                                    {achievement.achieved ? (
+                                        <p className="text-xs text-zinc-500">
+                                            Freigeschaltet am {new Date(achievement.achievedAt).toLocaleDateString('de-DE')}
+                                        </p>
+                                    ) : (
+                                        <p className="text-xs text-zinc-600">
+                                            {achievement.threshold ? `Ziel: ${achievement.threshold}` : 'Noch nicht freigeschaltet'}
+                                        </p>
+                                    )}
                                 </CardFooter>
-                            )}
+                            </div>
                         </Card>
                     ))}
                 </div>
