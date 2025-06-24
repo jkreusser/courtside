@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import Avatar from '@/components/ui/Avatar';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -53,8 +54,8 @@ export default function GameDetailPage({ params }) {
                         player2_id,
                         winner_id,
                         sets_to_win,
-                        player1:player1_id(id, name),
-                        player2:player2_id(id, name),
+                        player1:player1_id(id, name, avatar_url),
+                        player2:player2_id(id, name, avatar_url),
                         scores(
                             id,
                             player1_score,
@@ -119,8 +120,8 @@ export default function GameDetailPage({ params }) {
                                 player2_id,
                                 winner_id,
                                 sets_to_win,
-                                player1:player1_id(id, name),
-                                player2:player2_id(id, name),
+                                player1:player1_id(id, name, avatar_url),
+                                player2:player2_id(id, name, avatar_url),
                                 scores(
                                     id,
                                     player1_score,
@@ -997,6 +998,12 @@ export default function GameDetailPage({ params }) {
                 <CardContent>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="flex flex-col items-center p-4 border rounded-lg">
+                            <Avatar
+                                src={players.player1?.avatar_url}
+                                name={players.player1?.name}
+                                size="xl"
+                                className="mb-3"
+                            />
                             <h3 className="text-lg font-medium">{players.player1?.name}</h3>
                             {game.winner_id === players.player1?.id && (
                                 <span className="mt-2 px-2 py-1 bg-green-100 text-green-800 rounded text-sm font-medium">
@@ -1005,6 +1012,12 @@ export default function GameDetailPage({ params }) {
                             )}
                         </div>
                         <div className="flex flex-col items-center p-4 border rounded-lg">
+                            <Avatar
+                                src={players.player2?.avatar_url}
+                                name={players.player2?.name}
+                                size="xl"
+                                className="mb-3"
+                            />
                             <h3 className="text-lg font-medium">{players.player2?.name}</h3>
                             {game.winner_id === players.player2?.id && (
                                 <span className="mt-2 px-2 py-1 bg-green-100 text-green-800 rounded text-sm font-medium">
@@ -1071,28 +1084,46 @@ export default function GameDetailPage({ params }) {
                                 <thead>
                                     <tr className="border-b border-zinc-800">
                                         <th className="text-left py-3 px-4">Satz</th>
-                                        <th className="text-left py-3 px-4">{players.player1?.name}</th>
-                                        <th className="text-left py-3 px-4">{players.player2?.name}</th>
+                                        <th className="text-left py-3 px-4">
+                                            <div className="flex items-center gap-2">
+                                                <Avatar
+                                                    src={players.player1?.avatar_url}
+                                                    name={players.player1?.name}
+                                                    size="xs"
+                                                />
+                                                <span>{players.player1?.name}</span>
+                                            </div>
+                                        </th>
+                                        <th className="text-left py-3 px-4">
+                                            <div className="flex items-center gap-2">
+                                                <Avatar
+                                                    src={players.player2?.avatar_url}
+                                                    name={players.player2?.name}
+                                                    size="xs"
+                                                />
+                                                <span>{players.player2?.name}</span>
+                                            </div>
+                                        </th>
                                         <th className="text-left py-3 px-4">Datum</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {scores.map((score, index) => (
                                         <tr key={score.id} className="border-b border-zinc-800">
-                                            <td className="py-3 px-4">{index + 1}</td>
-                                            <td className="py-3 px-4 font-medium">
+                                            <td className="py-4 px-4">{index + 1}</td>
+                                            <td className="py-4 px-4 font-medium">
                                                 {score.player1_score}
                                                 {score.player1_score > score.player2_score && (
                                                     <span className="ml-2 text-primary">✓</span>
                                                 )}
                                             </td>
-                                            <td className="py-3 px-4 font-medium">
+                                            <td className="py-4 px-4 font-medium">
                                                 {score.player2_score}
                                                 {score.player2_score > score.player1_score && (
                                                     <span className="ml-2 text-primary">✓</span>
                                                 )}
                                             </td>
-                                            <td className="py-3 px-4">{new Date(score.created_at).toLocaleDateString()}</td>
+                                            <td className="py-4 px-4">{new Date(score.created_at).toLocaleDateString()}</td>
                                         </tr>
                                     ))}
                                 </tbody>

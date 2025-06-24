@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import DeleteConfirmDialog from '@/components/ui/DeleteConfirmDialog';
+import AvatarUpload from '@/components/ui/AvatarUpload';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 
@@ -232,9 +233,35 @@ export default function ProfilePage() {
         );
     }
 
+    // Avatar-Update Handler
+    const handleAvatarChange = (newAvatarUrl) => {
+        setProfile(prev => ({
+            ...prev,
+            avatar_url: newAvatarUrl
+        }));
+    };
+
     return (
         <div className="space-y-8">
             <h1 className="text-3xl font-bold">Mein Profil</h1>
+
+            {/* Profilbild */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Profilbild</CardTitle>
+                    <CardDescription>
+                        Lade ein Profilbild hoch, das in der App angezeigt wird.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <AvatarUpload
+                        userId={user.id}
+                        currentAvatarUrl={profile?.avatar_url}
+                        onAvatarChange={handleAvatarChange}
+                        className="py-4"
+                    />
+                </CardContent>
+            </Card>
 
             {/* Profilinformationen */}
             <Card>

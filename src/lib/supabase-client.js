@@ -189,7 +189,7 @@ export async function getProfile(userId) {
     try {
         const { data, error } = await supabase
             .from('players')
-            .select('*')
+            .select('id, name, email, role, avatar_url, created_at, deleted_at')
             .eq('id', userId)
             .single();
 
@@ -353,22 +353,19 @@ export async function getRankings(useCache = true, limit = 50) {
         // Auf Limit beschränken
         const limitedRankings = rankings.slice(0, limit);
 
-        // Spielernamen hinzufügen
+        // Spielernamen und Avatare hinzufügen
         const playerIds = limitedRankings.map(player => player.player_id);
         if (playerIds.length > 0) {
             const { data: playerData } = await supabase
                 .from('players')
-                .select('id, name')
+                .select('id, name, avatar_url')
                 .in('id', playerIds);
 
             if (playerData) {
-                const playerMap = {};
-                playerData.forEach(player => {
-                    playerMap[player.id] = player.name;
-                });
-
                 limitedRankings.forEach(player => {
-                    player.player_name = playerMap[player.player_id] || 'Unbekannt';
+                    const playerInfo = playerData.find(p => p.id === player.player_id);
+                    player.player_name = playerInfo?.name || 'Unbekannt';
+                    player.avatar_url = playerInfo?.avatar_url || null;
                 });
             }
         }
@@ -503,12 +500,12 @@ export async function getDailyRankings(date, useCache = true, limit = 50) {
         // Auf Limit beschränken
         const limitedRankings = rankings.slice(0, limit);
 
-        // Spielernamen hinzufügen
+        // Spielernamen und Avatare hinzufügen
         const playerIds = limitedRankings.map(player => player.player_id);
         if (playerIds.length > 0) {
             const { data: playerData } = await supabase
                 .from('players')
-                .select('id, name')
+                .select('id, name, avatar_url')
                 .in('id', playerIds);
 
             if (playerData) {
@@ -518,7 +515,9 @@ export async function getDailyRankings(date, useCache = true, limit = 50) {
                 });
 
                 limitedRankings.forEach(player => {
-                    player.player_name = playerMap[player.player_id] || 'Unbekannt';
+                    const playerInfo = playerData.find(p => p.id === player.player_id);
+                    player.player_name = playerInfo?.name || 'Unbekannt';
+                    player.avatar_url = playerInfo?.avatar_url || null;
                 });
             }
         }
@@ -590,8 +589,8 @@ export async function getGames(options = {}) {
             .select(`
                 *,
                 ${withPlayers ? `
-                player1:player1_id(*),
-                player2:player2_id(*),
+                player1:player1_id(id, name, email, avatar_url, created_at),
+                player2:player2_id(id, name, email, avatar_url, created_at),
                 ` : ''}
                 scores(*)
             `)
@@ -700,4 +699,233 @@ export async function deleteProfile(userId) {
         console.error('Fehler beim Löschen des Profils:', error);
         return { success: false, error };
     }
+}
+
+// Avatar-bezogene Funktionen
+export async function uploadAvatar(userId, file) {
+    try {
+        // Validierung
+        if (!file) {
+            throw new Error('Keine Datei ausgewählt');
+        }
+
+        // Dateigröße prüfen (max 5MB)
+        const maxSize = 5 * 1024 * 1024; // 5MB in Bytes
+        if (file.size > maxSize) {
+            throw new Error('Datei ist zu groß. Maximale Größe: 5MB');
+        }
+
+        // Dateityp prüfen
+        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+        if (!allowedTypes.includes(file.type)) {
+            throw new Error('Ungültiger Dateityp. Erlaubt: JPG, PNG, WebP');
+        }
+
+        // Eindeutigen Dateinamen generieren
+        const timestamp = Date.now();
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        const fileName = `${userId}/${timestamp}.${fileExtension}`;
+
+        console.log('🖼️ Uploading avatar:', fileName);
+
+        // Altes Avatar löschen (falls vorhanden)
+        await deleteOldAvatar(userId);
+
+        // Datei hochladen
+        const { data, error } = await supabase.storage
+            .from('avatars')
+            .upload(fileName, file, {
+                cacheControl: '3600',
+                upsert: false
+            });
+
+        if (error) {
+            console.error('Upload error:', error);
+            throw error;
+        }
+
+        console.log('✅ Avatar uploaded successfully:', data);
+
+        // Öffentliche URL generieren
+        const { data: urlData } = supabase.storage
+            .from('avatars')
+            .getPublicUrl(fileName);
+
+        const avatarUrl = urlData.publicUrl;
+
+        // Avatar-URL in der Datenbank speichern
+        const { error: updateError } = await supabase
+            .from('players')
+            .update({ avatar_url: avatarUrl })
+            .eq('id', userId);
+
+        if (updateError) {
+            console.error('Database update error:', updateError);
+            // Versuche hochgeladene Datei zu löschen, da DB-Update fehlgeschlagen
+            await supabase.storage.from('avatars').remove([fileName]);
+            throw updateError;
+        }
+
+        console.log('✅ Avatar URL updated in database');
+
+        // Cache invalidieren
+        invalidateCache('players');
+
+        return {
+            success: true,
+            avatarUrl,
+            message: 'Profilbild erfolgreich hochgeladen'
+        };
+
+    } catch (error) {
+        console.error('Fehler beim Avatar-Upload:', error);
+        return {
+            success: false,
+            error: error.message || 'Unbekannter Fehler beim Upload'
+        };
+    }
+}
+
+export async function deleteAvatar(userId) {
+    try {
+        console.log('🗑️ Deleting avatar for user:', userId);
+
+        // Aktuelle Avatar-URL aus der Datenbank holen
+        const { data: playerData, error: fetchError } = await supabase
+            .from('players')
+            .select('avatar_url')
+            .eq('id', userId)
+            .single();
+
+        if (fetchError) {
+            throw fetchError;
+        }
+
+        if (!playerData?.avatar_url) {
+            return {
+                success: true,
+                message: 'Kein Avatar zum Löschen vorhanden'
+            };
+        }
+
+        // Dateiname aus URL extrahieren
+        const fileName = extractFileNameFromUrl(playerData.avatar_url);
+
+        if (fileName) {
+            // Datei aus Storage löschen
+            const { error: deleteError } = await supabase.storage
+                .from('avatars')
+                .remove([fileName]);
+
+            if (deleteError) {
+                console.warn('Storage deletion warning:', deleteError);
+            }
+        }
+
+        // Avatar-URL aus Datenbank entfernen
+        const { error: updateError } = await supabase
+            .from('players')
+            .update({ avatar_url: null })
+            .eq('id', userId);
+
+        if (updateError) {
+            throw updateError;
+        }
+
+        console.log('✅ Avatar deleted successfully');
+
+        // Cache invalidieren
+        invalidateCache('players');
+
+        return {
+            success: true,
+            message: 'Profilbild erfolgreich gelöscht'
+        };
+
+    } catch (error) {
+        console.error('Fehler beim Avatar-Löschen:', error);
+        return {
+            success: false,
+            error: error.message || 'Unbekannter Fehler beim Löschen'
+        };
+    }
+}
+
+// Hilfsfunktion: Altes Avatar löschen
+async function deleteOldAvatar(userId) {
+    try {
+        const { data: playerData } = await supabase
+            .from('players')
+            .select('avatar_url')
+            .eq('id', userId)
+            .single();
+
+        if (playerData?.avatar_url) {
+            const fileName = extractFileNameFromUrl(playerData.avatar_url);
+            if (fileName) {
+                await supabase.storage.from('avatars').remove([fileName]);
+                console.log('🗑️ Old avatar deleted:', fileName);
+            }
+        }
+    } catch (error) {
+        console.warn('Warning: Could not delete old avatar:', error);
+    }
+}
+
+// Hilfsfunktion: Dateiname aus URL extrahieren
+function extractFileNameFromUrl(url) {
+    try {
+        if (!url) return null;
+
+        // URL-Pfad nach "avatars/" suchen
+        const match = url.match(/avatars\/(.+)$/);
+        return match ? match[1] : null;
+    } catch (error) {
+        console.warn('Could not extract filename from URL:', url);
+        return null;
+    }
+}
+
+// Hilfsfunktion: Avatar-URL für Benutzer abrufen
+export async function getAvatarUrl(userId) {
+    try {
+        const { data, error } = await supabase
+            .from('players')
+            .select('avatar_url')
+            .eq('id', userId)
+            .single();
+
+        if (error) {
+            console.warn('Could not fetch avatar URL:', error);
+            return null;
+        }
+
+        return data?.avatar_url || null;
+    } catch (error) {
+        console.warn('Error fetching avatar URL:', error);
+        return null;
+    }
+}
+
+// Hilfsfunktion: Standard-Avatar generieren (Initialen)
+export function generateDefaultAvatar(name) {
+    if (!name) return null;
+
+    const initials = name
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase())
+        .join('')
+        .substring(0, 2);
+
+    // Generiere eine einfache SVG mit Initialen (grau)
+    const svg = `data:image/svg+xml;base64,${btoa(`
+        <svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="50" r="50" fill="#6b7280"/>
+            <text x="50" y="50" text-anchor="middle" dy="0.35em" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="white">
+                ${initials}
+            </text>
+        </svg>
+    `)}`;
+
+    return svg;
 } 

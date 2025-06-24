@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { getRankings, getDailyRankings, getAvailableDates, supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Select, SelectOption } from '@/components/ui/Select';
+import Avatar from '@/components/ui/Avatar';
 import toast from 'react-hot-toast';
 import { format, subDays } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -74,13 +75,15 @@ function RankingsContent() {
                     if (playerIds.size > 0) {
                         const { data: playersData, error: playersError } = await supabase
                             .from('players')
-                            .select('id, name')
+                            .select('id, name, avatar_url')
                             .in('id', Array.from(playerIds));
 
                         if (!playersError && playersData) {
                             const namesMap = {};
+                            const avatarsMap = {};
                             playersData.forEach(player => {
                                 namesMap[player.id] = player.name;
+                                avatarsMap[player.id] = player.avatar_url;
                             });
 
                             // Verarbeite die Rankings-Daten
@@ -88,6 +91,7 @@ function RankingsContent() {
                                 ...ranking,
                                 rank: index + 1,
                                 player_name: namesMap[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`,
+                                avatar_url: avatarsMap[ranking.player_id] || null,
                                 total_points: ranking.total_points || 0
                             })) || [];
 
@@ -96,6 +100,7 @@ function RankingsContent() {
                                 ...ranking,
                                 rank: index + 1,
                                 player_name: namesMap[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`,
+                                avatar_url: avatarsMap[ranking.player_id] || null,
                                 win_percentage: ranking.win_percentage || 0,
                                 games_won: ranking.games_won || 0,
                                 games_played: ranking.games_played || 0,
@@ -163,14 +168,16 @@ function RankingsContent() {
                             if (playerIds.size > 0) {
                                 const { data: retryPlayersData, error: retryPlayersError } = await supabase
                                     .from('players')
-                                    .select('id, name')
+                                    .select('id, name, avatar_url')
                                     .in('id', Array.from(playerIds))
                                     .throwOnError();
 
                                 if (!retryPlayersError && retryPlayersData) {
                                     const namesMap = {};
+                                    const avatarsMap = {};
                                     retryPlayersData.forEach(player => {
                                         namesMap[player.id] = player.name;
+                                        avatarsMap[player.id] = player.avatar_url;
                                     });
                                     setPlayerNames(namesMap);
                                 }
@@ -180,13 +187,15 @@ function RankingsContent() {
                             const processedRankings = retryRankingsData.map((ranking, index) => ({
                                 ...ranking,
                                 rank: index + 1,
-                                player_name: playerNames[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`
+                                player_name: playerNames[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`,
+                                avatar_url: avatarsMap[ranking.player_id] || null
                             }));
 
                             // Verarbeite die Tagesrankings-Daten
                             const processedDailyRankings = retryDailyRankingsData.map(ranking => ({
                                 ...ranking,
-                                player_name: playerNames[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`
+                                player_name: playerNames[ranking.player_id] || `Spieler ${ranking.player_id.substring(0, 8)}...`,
+                                avatar_url: avatarsMap[ranking.player_id] || null
                             }));
 
                             setRankings(processedRankings);
@@ -281,7 +290,16 @@ function RankingsContent() {
                                                 <td className="py-3 px-4 font-semibold">
                                                     {index + 1}
                                                 </td>
-                                                <td className="py-3 px-4">{player.player_name}</td>
+                                                <td className="py-3 px-4">
+                                                    <div className="flex items-center gap-3">
+                                                        <Avatar
+                                                            src={player.avatar_url}
+                                                            name={player.player_name}
+                                                            size="sm"
+                                                        />
+                                                        <span>{player.player_name}</span>
+                                                    </div>
+                                                </td>
                                                 <td className="py-3 px-4 font-mono text-primary">
                                                     {player.win_percentage !== undefined ? `${player.win_percentage.toFixed(1)}%` : '0.0%'}
                                                 </td>
@@ -350,7 +368,16 @@ function RankingsContent() {
                                                 <td className="py-3 px-4 font-semibold">
                                                     {index + 1}
                                                 </td>
-                                                <td className="py-3 px-4">{player.player_name}</td>
+                                                <td className="py-3 px-4">
+                                                    <div className="flex items-center gap-3">
+                                                        <Avatar
+                                                            src={player.avatar_url}
+                                                            name={player.player_name}
+                                                            size="sm"
+                                                        />
+                                                        <span>{player.player_name}</span>
+                                                    </div>
+                                                </td>
                                                 <td className="py-3 px-4 font-mono">
                                                     {player.win_percentage !== undefined
                                                         ? `${player.win_percentage.toFixed(1)}%`

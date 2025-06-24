@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import Avatar from '@/components/ui/Avatar';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -54,8 +55,8 @@ function GamesPageContent() {
                         player2_id, 
                         winner_id,
                         sets_to_win,
-                        player1:player1_id(id, name),
-                        player2:player2_id(id, name),
+                        player1:player1_id(id, name, avatar_url),
+                        player2:player2_id(id, name, avatar_url),
                         scores(id, player1_score, player2_score)
                     `)
                     .order('created_at', { ascending: false })
@@ -95,8 +96,8 @@ function GamesPageContent() {
                                 player2_id, 
                                 winner_id,
                                 sets_to_win,
-                                player1:player1_id(id, name),
-                                player2:player2_id(id, name),
+                                player1:player1_id(id, name, avatar_url),
+                                player2:player2_id(id, name, avatar_url),
                                 scores(id, player1_score, player2_score)
                             `)
                             .order('created_at', { ascending: false })
@@ -345,14 +346,28 @@ function GamesPageContent() {
                                             </div>
 
                                             <div className="mb-3">
-                                                <div className="font-semibold mb-1">
-                                                    <span className={game.winner_id === game.player1_id ? 'font-bold text-primary' : ''}>
-                                                        {game.player1?.name || 'Unbekannt'}
-                                                    </span>
-                                                    {' vs '}
-                                                    <span className={game.winner_id === game.player2_id ? 'font-bold text-primary' : ''}>
-                                                        {game.player2?.name || 'Unbekannt'}
-                                                    </span>
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <Avatar
+                                                            src={game.player1?.avatar_url}
+                                                            name={game.player1?.name}
+                                                            size="sm"
+                                                        />
+                                                        <span className={game.winner_id === game.player1_id ? 'font-bold text-primary' : 'font-semibold'}>
+                                                            {game.player1?.name || 'Unbekannt'}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-zinc-400 px-2">vs</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <Avatar
+                                                            src={game.player2?.avatar_url}
+                                                            name={game.player2?.name}
+                                                            size="sm"
+                                                        />
+                                                        <span className={game.winner_id === game.player2_id ? 'font-bold text-primary' : 'font-semibold'}>
+                                                            {game.player2?.name || 'Unbekannt'}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -416,18 +431,32 @@ function GamesPageContent() {
                                                     className="border-b border-zinc-800 hover:bg-zinc-800/50 cursor-pointer transition-colors"
                                                     onClick={() => router.push(`/games/${game.id}`)}
                                                 >
-                                                    <td className="py-3 px-4">
-                                                        <div>
-                                                            <span className={game.winner_id === game.player1_id ? 'font-bold text-primary' : ''}>
-                                                                {game.player1?.name || 'Unbekannt'}
-                                                            </span>
-                                                            {' vs '}
-                                                            <span className={game.winner_id === game.player2_id ? 'font-bold text-primary' : ''}>
-                                                                {game.player2?.name || 'Unbekannt'}
-                                                            </span>
+                                                    <td className="py-4 px-4">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="flex items-center gap-2">
+                                                                <Avatar
+                                                                    src={game.player1?.avatar_url}
+                                                                    name={game.player1?.name}
+                                                                    size="sm"
+                                                                />
+                                                                <span className={game.winner_id === game.player1_id ? 'font-bold text-primary' : ''}>
+                                                                    {game.player1?.name || 'Unbekannt'}
+                                                                </span>
+                                                            </div>
+                                                            <span className="text-zinc-400">vs</span>
+                                                            <div className="flex items-center gap-2">
+                                                                <Avatar
+                                                                    src={game.player2?.avatar_url}
+                                                                    name={game.player2?.name}
+                                                                    size="sm"
+                                                                />
+                                                                <span className={game.winner_id === game.player2_id ? 'font-bold text-primary' : ''}>
+                                                                    {game.player2?.name || 'Unbekannt'}
+                                                                </span>
+                                                            </div>
                                                         </div>
                                                     </td>
-                                                    <td className="py-3 px-4">
+                                                    <td className="py-4 px-4">
                                                         {game.scores && game.scores.length > 0 ? (
                                                             <div className="font-mono text-sm">
                                                                 {game.scores.map((score, index) => (
@@ -446,19 +475,19 @@ function GamesPageContent() {
                                                             <span className="text-zinc-500">Keine Ergebnisse</span>
                                                         )}
                                                     </td>
-                                                    <td className="py-3 px-4">
+                                                    <td className="py-4 px-4">
                                                         <span className="text-xs font-medium bg-zinc-800 px-2 py-1 rounded">
                                                             {game.sets_to_win ? `Best of ${game.sets_to_win * 2 - 1}` : 'Best of 5'}
                                                         </span>
                                                     </td>
-                                                    <td className="py-3 px-4">
+                                                    <td className="py-4 px-4">
                                                         {game.scores && game.scores.length > 0 && game.status !== 'completed' ? (
                                                             <span className="text-xs font-medium px-2 py-1 rounded-full bg-white text-black">Läuft</span>
                                                         ) : (
                                                             renderStatus(game.status)
                                                         )}
                                                     </td>
-                                                    <td className="py-3 px-4">
+                                                    <td className="py-4 px-4">
                                                         {new Date(game.created_at).toLocaleDateString()}
                                                     </td>
                                                 </tr>
@@ -556,18 +585,18 @@ function GamesPageContent() {
                                                     className="border-b border-zinc-800 hover:bg-zinc-800/50 transition-colors cursor-pointer"
                                                     onClick={() => router.push(`/games/schedules/${schedule.id}`)}
                                                 >
-                                                    <td className="py-3 px-4">{schedule.name}</td>
-                                                    <td className="py-3 px-4">
+                                                    <td className="py-4 px-4">{schedule.name}</td>
+                                                    <td className="py-4 px-4">
                                                         <span className="bg-zinc-800 px-2 py-1 rounded text-xs font-medium">
                                                             {schedule.court_count} {schedule.court_count === 1 ? 'Court' : 'Courts'}
                                                         </span>
                                                     </td>
-                                                    <td className="py-3 px-4">
+                                                    <td className="py-4 px-4">
                                                         <span className="bg-zinc-800 px-2 py-1 rounded text-xs font-medium">
                                                             {playerCounts[schedule.id] || 0} Spieler
                                                         </span>
                                                     </td>
-                                                    <td className="py-3 px-4">{new Date(schedule.created_at).toLocaleDateString()}</td>
+                                                    <td className="py-4 px-4">{new Date(schedule.created_at).toLocaleDateString()}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

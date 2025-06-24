@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import Avatar from '@/components/ui/Avatar';
 import { useRouter, useParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -19,6 +20,7 @@ export default function ScheduleDetailPage() {
     const [loading, setLoading] = useState(true);
     const [isOwner, setIsOwner] = useState(false);
     const [playerNames, setPlayerNames] = useState({});
+    const [playerData, setPlayerData] = useState({}); // Für Namen und Avatar-URLs
     const [isDeleting, setIsDeleting] = useState(false);
 
     // Router-Schutz: Leite zur Login-Seite weiter, wenn der Benutzer nicht angemeldet ist
@@ -95,21 +97,27 @@ export default function ScheduleDetailPage() {
                     // Füge den Ersteller des Spielplans hinzu
                     if (scheduleData.created_by) playerIds.add(scheduleData.created_by);
 
-                    // Lade Spielernamen in einem Batch
+                    // Lade Spielerdaten (Namen und Avatare) in einem Batch
                     if (playerIds.size > 0) {
                         const { data: playersData, error: playersError } = await supabase
                             .from('players')
-                            .select('id, name')
+                            .select('id, name, avatar_url')
                             .in('id', Array.from(playerIds))
                             .throwOnError();
 
                         if (!playersError && playersData) {
                             const namesMap = {};
+                            const dataMap = {};
                             playersData.forEach(player => {
                                 namesMap[player.id] = player.name;
+                                dataMap[player.id] = {
+                                    name: player.name,
+                                    avatar_url: player.avatar_url
+                                };
                             });
                             if (isMounted) {
                                 setPlayerNames(namesMap);
+                                setPlayerData(dataMap);
                             }
                         }
                     }
@@ -191,20 +199,26 @@ export default function ScheduleDetailPage() {
                             // Füge den Ersteller des Spielplans hinzu
                             if (retryScheduleData.created_by) playerIds.add(retryScheduleData.created_by);
 
-                            // Lade Spielernamen in einem Batch
+                            // Lade Spielerdaten (Namen und Avatare) in einem Batch
                             if (playerIds.size > 0) {
                                 const { data: retryPlayersData, error: retryPlayersError } = await supabase
                                     .from('players')
-                                    .select('id, name')
+                                    .select('id, name, avatar_url')
                                     .in('id', Array.from(playerIds))
                                     .throwOnError();
 
                                 if (!retryPlayersError && retryPlayersData) {
                                     const namesMap = {};
+                                    const dataMap = {};
                                     retryPlayersData.forEach(player => {
                                         namesMap[player.id] = player.name;
+                                        dataMap[player.id] = {
+                                            name: player.name,
+                                            avatar_url: player.avatar_url
+                                        };
                                     });
                                     setPlayerNames(namesMap);
+                                    setPlayerData(dataMap);
                                 }
                             }
 
@@ -261,6 +275,15 @@ export default function ScheduleDetailPage() {
     const getPlayerName = (playerId) => {
         if (!playerId) return 'Kein Spieler';
         return playerNames[playerId] || `Spieler ${playerId.substring(0, 8)}...`;
+    };
+
+    // Hilfsfunktion zum Abrufen der Spielerdaten
+    const getPlayerData = (playerId) => {
+        if (!playerId) return { name: 'Kein Spieler', avatar_url: null };
+        return playerData[playerId] || {
+            name: `Spieler ${playerId.substring(0, 8)}...`,
+            avatar_url: null
+        };
     };
 
     // Lösche den Spielplan
@@ -402,7 +425,14 @@ export default function ScheduleDetailPage() {
                         </div>
                         <div>
                             <div className="text-sm text-zinc-500 mb-1">Erstellt von</div>
-                            <div className="font-semibold">{getPlayerName(schedule.created_by)}</div>
+                            <div className="flex items-center gap-2">
+                                <Avatar
+                                    src={getPlayerData(schedule.created_by).avatar_url}
+                                    name={getPlayerData(schedule.created_by).name}
+                                    size="sm"
+                                />
+                                <span className="font-semibold">{getPlayerName(schedule.created_by)}</span>
+                            </div>
                         </div>
                         <div>
                             <div className="text-sm text-zinc-500 mb-1">Erstellt am</div>
@@ -431,8 +461,24 @@ export default function ScheduleDetailPage() {
                                                 Court {(index % schedule.court_count) + 1}
                                             </div>
                                         </div>
-                                        <div className="font-medium">
-                                            {getPlayerName(match.player1_id)} vs {getPlayerName(match.player2_id)}
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <Avatar
+                                                    src={getPlayerData(match.player1_id).avatar_url}
+                                                    name={getPlayerData(match.player1_id).name}
+                                                    size="sm"
+                                                />
+                                                <span className="font-medium">{getPlayerName(match.player1_id)}</span>
+                                            </div>
+                                            <span className="text-zinc-400 px-2">vs</span>
+                                            <div className="flex items-center gap-2">
+                                                <Avatar
+                                                    src={getPlayerData(match.player2_id).avatar_url}
+                                                    name={getPlayerData(match.player2_id).name}
+                                                    size="sm"
+                                                />
+                                                <span className="font-medium">{getPlayerName(match.player2_id)}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
@@ -455,10 +501,28 @@ export default function ScheduleDetailPage() {
                                                 key={match.id}
                                                 className="border-b border-zinc-800 hover:bg-zinc-800/50 transition-colors"
                                             >
-                                                <td className="py-3 px-4">{(index % schedule.court_count) + 1}</td>
-                                                <td className="py-3 px-4">{getPlayerName(match.player1_id)}</td>
-                                                <td className="py-3 px-4 text-center">vs</td>
-                                                <td className="py-3 px-4">{getPlayerName(match.player2_id)}</td>
+                                                <td className="py-4 px-4">{(index % schedule.court_count) + 1}</td>
+                                                <td className="py-4 px-4">
+                                                    <div className="flex items-center gap-2">
+                                                        <Avatar
+                                                            src={getPlayerData(match.player1_id).avatar_url}
+                                                            name={getPlayerData(match.player1_id).name}
+                                                            size="sm"
+                                                        />
+                                                        <span>{getPlayerName(match.player1_id)}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="py-4 px-4 text-center">vs</td>
+                                                <td className="py-4 px-4">
+                                                    <div className="flex items-center gap-2">
+                                                        <Avatar
+                                                            src={getPlayerData(match.player2_id).avatar_url}
+                                                            name={getPlayerData(match.player2_id).name}
+                                                            size="sm"
+                                                        />
+                                                        <span>{getPlayerName(match.player2_id)}</span>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>

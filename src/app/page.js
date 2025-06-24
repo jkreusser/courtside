@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback, Suspense, useRef } from 'rea
 import { supabase, checkConnection, getRankings } from '@/lib/supabase-client';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import Avatar from '@/components/ui/Avatar';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import toast from 'react-hot-toast';
@@ -568,7 +569,16 @@ export default function DashboardPage() {
                           <td className="py-3 px-2 sm:px-4 font-semibold">
                             {index + 1}
                           </td>
-                          <td className="py-3 px-2 sm:px-4">{player.player_name || 'Unbekannt'}</td>
+                          <td className="py-3 px-2 sm:px-4">
+                            <div className="flex items-center gap-3">
+                              <Avatar
+                                src={player.avatar_url}
+                                name={player.player_name}
+                                size="sm"
+                              />
+                              <span>{player.player_name || 'Unbekannt'}</span>
+                            </div>
+                          </td>
                           <td className="py-3 px-2 sm:px-4 font-mono">
                             {player.win_percentage !== undefined
                               ? `${player.win_percentage.toFixed(1)}%`
@@ -655,12 +665,19 @@ export default function DashboardPage() {
                     <Link href={`/games/${game.id}`} key={game.id} className="block">
                       <div className="border border-zinc-800 rounded-md p-3 sm:p-4 hover:border-zinc-600 hover:bg-zinc-900/30 transition-colors">
                         <div className="flex flex-col sm:flex-row sm:justify-between gap-2 sm:gap-4">
-                          <div>
-                            <h3 className="font-semibold text-base sm:text-lg mb-1">
-                              Gegen {opponent && opponent.name ? opponent.name : 'Unbekannt'}
-                            </h3>
-                            <div className="text-xs sm:text-sm text-zinc-400">
-                              {new Date(game.created_at).toLocaleDateString('de-DE')}
+                          <div className="flex items-center gap-3">
+                            <Avatar
+                              src={opponent?.avatar_url}
+                              name={opponent?.name}
+                              size="md"
+                            />
+                            <div>
+                              <h3 className="font-semibold text-base sm:text-lg mb-1">
+                                Gegen {opponent && opponent.name ? opponent.name : 'Unbekannt'}
+                              </h3>
+                              <div className="text-xs sm:text-sm text-zinc-400">
+                                {new Date(game.created_at).toLocaleDateString('de-DE')}
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center justify-between sm:justify-normal sm:space-x-4">
